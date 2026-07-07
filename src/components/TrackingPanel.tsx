@@ -11,13 +11,13 @@ interface TrackingPanelProps {
 }
 
 const STATUS_OPTIONS: Array<{ value: CallStatus; label: string }> = [
-  { value: '', label: '-- Select Call Outcome --' },
-  { value: 'yes', label: 'Yes' },
-  { value: 'no', label: 'No' },
-  { value: 'notpicking', label: 'Not Picking' },
-  { value: 'phoneoff', label: 'Phone Off' },
-  { value: 'changedaddr', label: 'Changed Address' },
-  { value: 'other', label: 'Other' },
+  { value: '' as CallStatus, label: '-- Select Call Outcome --' },
+  { value: 'yes' as CallStatus, label: 'Yes' },
+  { value: 'no' as CallStatus, label: 'No' },
+  { value: 'notpicking' as CallStatus, label: 'Not Picking' },
+  { value: 'phoneoff' as CallStatus, label: 'Phone Off' },
+  { value: 'changedaddr' as CallStatus, label: 'Changed Address' },
+  { value: 'other' as CallStatus, label: 'Other' },
 ];
 
 export function TrackingPanel({
@@ -37,7 +37,8 @@ export function TrackingPanel({
         <h3>Call Status</h3>
         <select
           className="status-dropdown"
-          value={record.status}
+          /* Added || '' fallback wrapper to bind stably to placeholder if status is undefined or empty */
+          value={record.status || ''}
           onChange={async (event) => {
             const selectedValue = event.target.value as CallStatus;
             await onUpdateRecord('status', selectedValue);
@@ -47,7 +48,8 @@ export function TrackingPanel({
           }}
         >
           {STATUS_OPTIONS.map((option) => (
-            <option key={option.label} value={option.value} disabled={option.value === ''}>
+            /* Switched key targeting from label to stable unique value string identifier */
+            <option key={option.value} value={option.value} disabled={option.value === ''}>
               {option.label}
             </option>
           ))}
@@ -58,7 +60,7 @@ export function TrackingPanel({
             <input
               type="text"
               placeholder="Describe the outcome..."
-              value={record.customResponse}
+              value={record.customResponse || ''}
               onChange={async (event) => onUpdateRecord('customResponse', event.target.value)}
             />
           </div>
@@ -70,7 +72,7 @@ export function TrackingPanel({
         <textarea
           id="call-notes"
           placeholder="Add notes, prayer requests, or follow-up details..."
-          value={record.notes}
+          value={record.notes || ''}
           onChange={async (event) => onUpdateRecord('notes', event.target.value)}
         />
       </div>
