@@ -130,7 +130,7 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
           padding: '2.5rem 1.5rem',
           textAlign: 'center',
           backgroundColor: 'var(--neutral-100)',
-          cursor: pointer,
+          cursor: 'pointer', // Fixed syntax error here
           transition: 'all 0.2s ease',
           marginBottom: '2rem'
         }}
