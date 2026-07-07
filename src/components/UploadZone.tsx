@@ -177,7 +177,7 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
               <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--neutral-900)' }}>1. Prepare Your Spreadsheet</h4>
               <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem' }}>
                 Your Excel or CSV file just needs two basic columns. The system automatically scans for column headers like <em>Name, Full Name, Phone, Contact, or Mobile</em>.
-                <b>NOTE:</b> The Document should  <b>NOT</b have a heading line eg. List of members.
+                <b>NOTE:</b> The Document should  <b>NOT</b> have a heading line eg. List of members.
               </p>
             </div>
           </div>
