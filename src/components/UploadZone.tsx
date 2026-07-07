@@ -1,7 +1,7 @@
 import { useRef, type DragEvent } from 'react';
 import * as XLSX from 'xlsx';
 import { FileSpreadsheet, Upload } from 'lucide-react';
-import type { CampaignRecord } from '../types';
+import type { CampaignRecord, CallStatus } from '../types';
 
 interface UploadZoneProps {
   onRecordsParsed: (records: CampaignRecord[]) => Promise<void>;
@@ -65,13 +65,13 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
         return;
       }
 
-      const transformed = rows
+      const transformed: CampaignRecord[] = rows
         .map((row, index) => ({
           id: index,
           congregantId: index,
           name: String(row[nameCol] ?? '').trim(),
           phone: normalizePhone(row[phoneCol]),
-          status: '',
+          status: '' as CallStatus,
           notes: '',
           customResponse: '',
         }))
