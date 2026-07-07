@@ -1,0 +1,572 @@
+<!-- Heavy-lifting libraries loaded from CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.344.0/dist/umd/lucide.min.js"></script>
+
+<style>
+    :root {
+        --primary: #4f46e5;
+        --primary-hover: #4338ca;
+        --success: #10b981;
+        --success-hover: #059669;
+        --warning: #f59e0b;
+        --danger: #ef4444;
+        --neutral-50: #f8fafc;
+        --neutral-100: #f1f5f9;
+        --neutral-200: #e2e8f0;
+        --neutral-300: #cbd5e1;
+        --neutral-600: #475569;
+        --neutral-700: #334155;
+        --neutral-800: #1e293b;
+        --neutral-900: #0f172a;
+        --radius: 16px;
+    }
+
+    * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    body {
+        background-color: var(--neutral-50);
+        color: var(--neutral-900);
+        line-height: 1.6;
+        padding: 2rem 1rem;
+        display: flex;
+        justify-content: center;
+        min-height: 100vh;
+    }
+
+    .container {
+        width: 100%;
+        max-width: 800px;
+    }
+
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--primary);
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 600;
+        margin-bottom: 2rem;
+        transition: transform 0.2s ease;
+    }
+
+    .back-link:hover {
+        transform: translateX(-4px);
+    }
+
+    .header {
+        margin-bottom: 2.5rem;
+        text-align: center;
+    }
+
+    .header h1 {
+        font-size: 2.25rem;
+        color: var(--neutral-900);
+        font-weight: 800;
+        letter-spacing: -0.025em;
+        margin-bottom: 0.5rem;
+    }
+
+    .header p {
+        color: var(--neutral-600);
+        font-size: 1.05rem;
+    }
+
+    .tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        background: var(--neutral-100);
+        padding: 6px;
+        border-radius: 12px;
+        margin-bottom: 2rem;
+        border: 1px solid var(--neutral-200);
+    }
+
+    .tab-btn {
+        background: transparent;
+        border: none;
+        padding: 12px;
+        font-size: 0.95rem;
+        font-weight: 700;
+        cursor: pointer;
+        color: var(--neutral-600);
+        border-radius: 8px;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+    }
+
+    .tab-btn.active {
+        background: white;
+        color: var(--neutral-900);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    }
+
+    .card {
+        background: white;
+        border-radius: var(--radius);
+        border: 1px solid var(--neutral-200);
+        padding: 2.5rem;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.02), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
+        margin-bottom: 2rem;
+    }
+
+    .card h2 {
+        font-size: 1.5rem;
+        font-weight: 800;
+        margin-bottom: 0.5rem;
+        color: var(--neutral-800);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .card p.description {
+        color: var(--neutral-600);
+        font-size: 0.95rem;
+        margin-bottom: 2rem;
+    }
+
+    .dropzone {
+        border: 2px dashed var(--primary);
+        background: #f8fafc;
+        border-radius: 12px;
+        padding: 3rem 1.5rem;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+    }
+
+    .dropzone:hover, .dropzone.dragover {
+        background: #eef2ff;
+        border-color: var(--primary-hover);
+    }
+
+    .dropzone input {
+        display: none;
+    }
+
+    .dropzone-icon {
+        color: var(--primary);
+        margin-bottom: 1rem;
+        display: inline-flex;
+        background: #eef2ff;
+        padding: 1rem;
+        border-radius: 50%;
+    }
+
+    .preview-container {
+        margin-top: 1.5rem;
+        display: none;
+        text-align: center;
+        background: var(--neutral-50);
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px dashed var(--neutral-300);
+    }
+
+    .preview-image {
+        max-width: 100%;
+        max-height: 250px;
+        border-radius: 8px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    }
+
+    .options-group {
+        margin-top: 2rem;
+        border-top: 1px solid var(--neutral-200);
+        padding-top: 1.5rem;
+    }
+
+    .options-title {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: var(--neutral-800);
+        margin-bottom: 0.75rem;
+    }
+
+    .format-selector {
+        display: flex;
+        gap: 12px;
+    }
+
+    .format-label {
+        flex: 1;
+        border: 2px solid var(--neutral-200);
+        padding: 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        font-weight: 700;
+        font-size: 0.9rem;
+        transition: all 0.2s ease;
+    }
+
+    .format-label input {
+        display: none;
+    }
+
+    .format-label:has(input:checked) {
+        border-color: var(--primary);
+        background: #eff6ff;
+        color: var(--primary);
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        width: 100%;
+        padding: 1rem;
+        background-color: var(--primary);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        font-weight: 700;
+        font-size: 1rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        margin-top: 2rem;
+        box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2);
+    }
+
+    .btn:hover:not(:disabled) {
+        background-color: var(--primary-hover);
+        transform: translateY(-1px);
+    }
+
+    .btn:disabled {
+        background-color: var(--neutral-200);
+        color: var(--neutral-600);
+        cursor: not-allowed;
+        box-shadow: none;
+    }
+
+    .status-message {
+        margin-top: 1.5rem;
+        padding: 1rem;
+        border-radius: 10px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        display: none;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .status-message.info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+    .status-message.success { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .status-message.error { background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
+
+    .hidden { display: none !important; }
+
+    /* Guide card */
+    .guide-box {
+        background: #ffffff;
+        border-radius: var(--radius);
+        padding: 2rem;
+        border: 1px solid var(--neutral-200);
+    }
+
+    .guide-box h3 {
+        font-size: 1.1rem;
+        font-weight: 800;
+        color: var(--neutral-800);
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .guide-steps {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .step {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+    }
+
+    .step-num {
+        background: #eef2ff;
+        color: var(--primary);
+        font-weight: 800;
+        font-size: 0.85rem;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .step-text h4 {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: var(--neutral-900);
+    }
+
+    .step-text p {
+        font-size: 0.85rem;
+        color: var(--neutral-600);
+        margin-top: 2px;
+    }
+</style>
+
+
+<div class="container">
+    <!-- Return route pointer back to native Call Center Workspace -->
+    <a href="/" class="back-link"><i data-lucide="arrow-left"></i> Return to Local Call Center</a>
+
+    <div class="header">
+        <h1>Campaign Data Companion</h1>
+        <p>Convert handwriting photos or format problematic rosters using serverless Cloud AI</p>
+    </div>
+
+    <div class="tabs">
+        <button id="tab-ocr" class="tab-btn active" onclick="switchTab('ocr')">
+            <i data-lucide="camera"></i> Image OCR Engine
+        </button>
+        <button id="tab-sanitize" class="tab-btn" onclick="switchTab('sanitize')">
+            <i data-lucide="sparkles"></i> Clean & Normalize Sheet
+        </button>
+    </div>
+
+    <!-- WORKSPACE CARD -->
+    <div class="card">
+        
+        <!-- PANEL A: HANDWRITTEN PHOTO EXTRACTION -->
+        <div id="panel-ocr">
+            <h2>Handwritten List Extractor</h2>
+            <p class="description">Snap a sharp photo of pen-and-paper sign-up lists, cell group cards, or rosters. The Cloud AI reads names and phone numbers directly from the picture and compiles them.</p>
+            
+            <div class="dropzone" id="dropzone-ocr" onclick="document.getElementById('file-ocr').click()">
+                <input type="file" id="file-ocr" accept="image/*" onchange="handleImageSelection(this)">
+                <div class="dropzone-icon"><i data-lucide="camera"></i></div>
+                <p style="font-weight: 700; font-size: 1.05rem; margin-bottom: 4px;">Capture Photo or Select Image</p>
+                <p style="font-size: 0.85rem; color: var(--neutral-600);">Supports JPG, PNG formats up to 5MB</p>
+            </div>
+
+            <div class="preview-container" id="preview-ocr">
+                <p style="font-size: 0.8rem; margin-bottom: 8px; font-weight:700; color: var(--neutral-700);">Selected Roster Image:</p>
+                <img id="img-ocr-display" class="preview-image" src="#" alt="Upload preview">
+            </div>
+        </div>
+
+        <!-- PANEL B: SHEET CLEANER & NORMALIZER -->
+        <div id="panel-sanitize" class="hidden">
+            <h2>Roster Normalization Helper</h2>
+            <p class="description">Upload problematic, broken, or weirdly formatted CSV/XLSX lists. The AI identifies conjoined names, isolates contact telephone numbers, and formats properties cleanly.</p>
+            
+            <div class="dropzone" id="dropzone-sanitize" onclick="document.getElementById('file-sanitize').click()">
+                <input type="file" id="file-sanitize" accept=".csv,.xlsx,.xls" onchange="handleSheetSelection(this)">
+                <div class="dropzone-icon"><i data-lucide="file-spreadsheet"></i></div>
+                <p style="font-weight: 700; font-size: 1.05rem; margin-bottom: 4px;">Select Dirty Spreadsheet</p>
+                <p style="font-size: 0.85rem; color: var(--neutral-600);">Supports CSV, XLSX up to 10MB</p>
+            </div>
+        </div>
+
+        <!-- EXPORT COMPILATION CONFIGURATIONS -->
+        <div class="options-group">
+            <p class="options-title">Select Download Output File Format:</p>
+            <div class="format-selector">
+                <label class="format-label">
+                    <input type="radio" name="output-format" value="xlsx" checked>
+                    <i data-lucide="file-spreadsheet" style="color: var(--success);"></i> Microsoft Excel (.xlsx)
+                </label>
+                <label class="format-label">
+                    <input type="radio" name="output-format" value="csv">
+                    <i data-lucide="file-text" style="color: var(--primary);"></i> Plain CSV (.csv)
+                </label>
+            </div>
+        </div>
+
+        <!-- SUBMIT & TRIGGER ACTIONS -->
+        <button id="btn-submit" class="btn" disabled onclick="executeProcessorPipeline()">
+            <i data-lucide="play"></i> Analyze & Export Clean File
+        </button>
+
+        <!-- PROCESS FEEDBACK ALERTS -->
+        <div id="alert-status" class="status-message"></div>
+    </div>
+
+    <!-- OPERATIONAL USER GUIDE -->
+    <div class="guide-box">
+        <h3><i data-lucide="info"></i> Quick Integration Guide</h3>
+        <div class="guide-steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-text">
+                    <h4>Convert Roster Offline</h4>
+                    <p>Upload handwritten lists or messy formats. The AI processes inputs and automatically creates structural records matching 'Name' and 'Phone'.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-text">
+                    <h4>Download Your Clean File</h4>
+                    <p>Choose either standard .xlsx or .csv output formats. Tapping execute starts an automatic download process.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-text">
+                    <h4>Import directly to Call Center workspace</h4>
+                    <p>Return to the main local browser application screen, drop in the compiled export file, and start follow-up calls immediately.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Production Cloudflare AI Worker Endpoint URL
+    const WORKER_API_ENDPOINT = '/api/companion-process';
+
+    let activeTab = 'ocr';
+    let selectedFileBlob = null;
+    let selectedImageBase64 = null;
+
+    window.addEventListener('DOMContentLoaded', () => {
+        lucide.createIcons();
+    });
+
+    function switchTab(tab) {
+        activeTab = tab;
+        document.getElementById('tab-ocr').classList.toggle('active', tab === 'ocr');
+        document.getElementById('tab-sanitize').classList.toggle('active', tab === 'sanitize');
+        
+        document.getElementById('panel-ocr').classList.toggle('hidden', tab !== 'ocr');
+        document.getElementById('panel-sanitize').classList.toggle('hidden', tab !== 'sanitize');
+        
+        resetSelectionAndAlerts();
+    }
+
+    function resetSelectionAndAlerts() {
+        selectedFileBlob = null;
+        selectedImageBase64 = null;
+        document.getElementById('preview-ocr').style.display = 'none';
+        document.getElementById('btn-submit').disabled = true;
+        document.getElementById('alert-status').style.display = 'none';
+    }
+
+    function handleImageSelection(input) {
+        const file = input.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('img-ocr-display').src = e.target.result;
+            document.getElementById('preview-ocr').style.display = 'block';
+            selectedImageBase64 = e.target.result.split(',')[1];
+            document.getElementById('btn-submit').disabled = false;
+            showAlert('Image parsed successfully. Ready to run AI OCR pipeline.', 'info');
+        }
+        reader.readAsDataURL(file);
+    }
+
+    function handleSheetSelection(input) {
+        const file = input.files[0];
+        if (!file) return;
+
+        selectedFileBlob = file;
+        document.getElementById('btn-submit').disabled = false;
+        showAlert(`Loaded ${file.name}. Ready to normalize roster properties.`, 'info');
+    }
+
+    function showAlert(msg, type) {
+        const alertBox = document.getElementById('alert-status');
+        alertBox.innerText = msg;
+        alertBox.className = `status-message ${type}`;
+        alertBox.style.display = 'flex';
+    }
+
+    async function executeProcessorPipeline() {
+        const submitBtn = document.getElementById('btn-submit');
+        submitBtn.disabled = true;
+        showAlert('Cloud AI is currently processing your data. This may take up to 20 seconds...', 'info');
+
+        try {
+            let parsedResultJson = [];
+
+            if (activeTab === 'ocr') {
+                const response = await fetch(WORKER_API_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'ocr',
+                        image: selectedImageBase64
+                    })
+                });
+
+                if (!response.ok) throw new Error('Cloud OCR transaction failed.');
+                const result = await response.json();
+                parsedResultJson = result.data;
+
+            } else {
+                // Pre-parse the dirty sheet to a raw text format to keep payload size lightweight
+                const buffer = await selectedFileBlob.arrayBuffer();
+                const workbook = XLSX.read(buffer, { type: 'array' });
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rawRows = XLSX.utils.sheet_to_json(worksheet);
+
+                const response = await fetch(WORKER_API_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'sanitize',
+                        data: rawRows
+                    })
+                });
+
+                if (!response.ok) throw new Error('Normalization request rejected by edge worker.');
+                const result = await response.json();
+                parsedResultJson = result.data;
+            }
+
+            if (!parsedResultJson || parsedResultJson.length === 0) {
+                throw new Error('AI was unable to extract any structured records from the input.');
+            }
+
+            // Compile and download the output
+            triggerLocalDownload(parsedResultJson);
+            showAlert(`Success! Extracted ${parsedResultJson.length} normalized records.`, 'success');
+
+        } catch (error) {
+            console.error(error);
+            showAlert(`Operation Failed: ${error.message}. Please try again.`, 'error');
+            submitBtn.disabled = false;
+        }
+    }
+
+    function triggerLocalDownload(data) {
+        const format = document.querySelector('input[name="output-format"]:checked').value;
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Campaign List");
+
+        const dateStr = new Date().toISOString().slice(0, 10);
+        
+        if (format === 'xlsx') {
+            XLSX.writeFile(workbook, `Cleaned_Campaign_${dateStr}.xlsx`);
+        } else {
+            XLSX.writeFile(workbook, `Cleaned_Campaign_${dateStr}.csv`, { bookType: 'csv' });
+        }
+    }
+</script>
