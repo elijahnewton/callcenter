@@ -1,6 +1,6 @@
 import { useRef, type DragEvent } from 'react';
 import * as XLSX from 'xlsx';
-import { FileSpreadsheet, Upload } from 'lucide-react';
+import { FileSpreadsheet, Upload, CheckCircle2, ShieldAlert, PhoneCall, Save } from 'lucide-react';
 import type { CampaignRecord, CallStatus } from '../types';
 
 interface UploadZoneProps {
@@ -109,36 +109,110 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
   };
 
   return (
-    <div
-      className="upload-zone"
-      onClick={() => inputRef.current?.click()}
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          inputRef.current?.click();
-        }
-      }}
-    >
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".csv,.xlsx,.xls"
-        onChange={async (event) => {
-          const file = event.target.files?.[0];
-          if (file) {
-            await parseFile(file);
-            event.currentTarget.value = '';
+    <div style={{ maxWidth: '650px', margin: '0 auto', padding: '1rem' }}>
+      {/* Interactive Drop Zone Area */}
+      <div
+        className="upload-zone"
+        onClick={() => inputRef.current?.click()}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            inputRef.current?.click();
           }
         }}
-      />
-      <div className="upload-icon"><Upload size={36} /></div>
-      <h2>Upload Congregant List</h2>
-      <p>Drag and drop your CSV/XLSX file here, or click to browse.</p>
-      <p className="help-text"><FileSpreadsheet size={14} /> Supported columns: Name, Phone, Contact</p>
+        style={{
+          border: '2px dashed var(--primary)',
+          borderRadius: '12px',
+          padding: '2.5rem 1.5rem',
+          textAlign: 'center',
+          backgroundColor: 'var(--neutral-100)',
+          cursor: pointer,
+          transition: 'all 0.2s ease',
+          marginBottom: '2rem'
+        }}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".csv,.xlsx,.xls"
+          onChange={async (event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              await parseFile(file);
+              event.currentTarget.value = '';
+            }
+          }}
+          style={{ display: 'none' }}
+        />
+        <div style={{ display: 'inline-flex', padding: '1rem', background: '#eef2ff', borderRadius: '50%', color: 'var(--primary)', marginBottom: '1rem' }}>
+          <Upload size={32} />
+        </div>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--neutral-900)' }}>
+          Upload Your Campaign List
+        </h2>
+        <p style={{ fontSize: '0.95rem', color: 'var(--neutral-600)', marginBottom: '0.75rem' }}>
+          Drag and drop your spreadsheet here, or click to browse files.
+        </p>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', background: '#ffffff', padding: '0.4rem 0.8rem', borderRadius: '20px', border: '1px solid var(--neutral-200)', color: 'var(--neutral-600)' }}>
+          <FileSpreadsheet size={14} style={{ color: 'var(--success)' }} />
+          <span>Auto-detects columns looking like <strong>Name</strong> and <strong>Phone</strong></span>
+        </div>
+      </div>
+
+      {/* Explanatory Guide Box */}
+      <div style={{ background: '#ffffff', borderRadius: '12px', padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid var(--neutral-200)' }}>
+        <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--neutral-800)', borderBottom: '1px solid var(--neutral-200)', paddingBottom: '0.5rem' }}>
+          💡 How to Use This Application
+        </h3>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <div style={{ color: 'var(--primary)', marginTop: '2px' }}><CheckCircle2 size={18} /></div>
+            <div>
+              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--neutral-900)' }}>1. Prepare Your Spreadsheet</h4>
+              <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem' }}>
+                Your Excel or CSV file just needs two basic columns. The system automatically scans for column headers like <em>Name, Full Name, Phone, Contact, or Mobile</em>.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <div style={{ color: 'var(--success)', marginTop: '2px' }}><PhoneCall size={18} /></div>
+            <div>
+              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--neutral-900)' }}>2. Call with One Tap</h4>
+              <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem' }}>
+                The workspace guides you through the sheet contact by contact. Tap the <strong>Call Now</strong> button to launch your device's native phone dialer immediately without jumping between windows.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <div style={{ color: 'var(--warning)', marginTop: '2px' }}><Save size={18} /></div>
+            <div>
+              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--neutral-900)' }}>3. Log Responses & Export Progress</h4>
+              <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem' }}>
+                Select an outcome from the dropdown menu and type extra prayer requests or remarks. Your progress automatically saves to the device. Click the disk icon anytime or finish the list to export an updated Excel report tracking all details.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem', background: '#f8fafc', padding: '0.75rem', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+            <div style={{ color: '#6366f1', marginTop: '2px' }}><ShieldAlert size={18} /></div>
+            <div>
+              <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--neutral-800)' }}>🔒 Private & 100% Offline</h4>
+              <p style={{ fontSize: '0.8rem', color: 'var(--neutral-600)', marginTop: '0.15rem', lineHeight: '1.4' }}>
+                Once this webpage is initially loaded, it operates completely offline. Your contact sheets and logged details are processed locally in your browser memory and are <strong>never</strong> transmitted over the internet or sent to an external server.
+              </p>
+            </div>
+          </div>
+
+        </div>
+      </div>
     </div>
   );
 }
