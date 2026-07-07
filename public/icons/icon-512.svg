@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Church Calls icon">
+  <rect width="512" height="512" rx="72" fill="#4f46e5" />
+  <path d="M154 142h204a24 24 0 0 1 24 24v180a24 24 0 0 1-24 24H154a24 24 0 0 1-24-24V166a24 24 0 0 1 24-24z" fill="#fff" opacity="0.15"/>
+  <path d="M188 202c0-32 26-58 58-58h52c32 0 58 26 58 58v32c0 32-26 58-58 58h-52c-32 0-58-26-58-58v-32z" fill="#fff"/>
+  <path d="M174 362c24-30 51-46 82-46s58 16 82 46" stroke="#fff" stroke-width="28" stroke-linecap="round" fill="none"/>
+</svg>
