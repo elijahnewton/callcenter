@@ -1,4 +1,4 @@
-name = "callcenter-ai1"
+name = "callcenter-ai"
 main = "companion-utility/index.ts"
 compatibility_date = "2026-07-10"
 
