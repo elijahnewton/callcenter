@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Campaign Data Companion - OCR, Parse, and Sanitize Rosters">
+    <title>Campaign Data Companion</title>
+    
+    <!-- Google Fonts & CDN Libraries -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lucide@0.344.0/dist/umd/lucide.min.js"></script>
+
+    <style>
+        :root {
+            --bg-base: #0f172a;
+            --bg-card: #1e293b;
+            --bg-card-hover: #243147;
+            --border-color: #334155;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --primary-glow: rgba(99, 102, 241, 0.15);
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.1);
+            --error: #ef4444;
+            --error-glow: rgba(239, 68, 68, 0.1);
+            --warning: #f59e0b;
+            --radius-lg: 16px;
+            --radius-md: 12px;
+            --transition-smooth: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 2.5rem 1.5rem;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.12) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(79, 70, 229, 0.08) 0px, transparent 50%);
+            background-attachment: fixed;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 850px;
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Header link back to Call Center */
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.95rem;
+            font-weight: 500;
+            margin-bottom: 2rem;
+            transition: var(--transition-smooth);
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 1px solid transparent;
+        }
+
+        .back-link:hover {
+            color: var(--primary);
+            border-color: var(--border-color);
+            background-color: var(--bg-card);
+            transform: translateX(-4px);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #fff 30%, #818cf8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.02em;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            font-weight: 400;
+        }
+
+        /* Custom Tabs Grid */
+        .tabs {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            background: var(--bg-card);
+            padding: 6px;
+            border-radius: var(--radius-md);
+            margin-bottom: 2rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            padding: 14px 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            color: var(--text-muted);
+            border-radius: 8px;
+            transition: var(--transition-smooth);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .tab-btn.active {
+            background: var(--primary);
+            color: #ffffff;
+            box-shadow: 0 4px 12px var(--primary-glow);
+        }
+
+        /* Workdesk Card styling */
+        .card {
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-color);
+            padding: 2.5rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
+            margin-bottom: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary), #818cf8);
+        }
+
+        .panel h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-main);
+        }
+
+        .panel p.description {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-bottom: 2rem;
+            line-height: 1.6;
+        }
+
+        /* Drag Zone & Upload boxes */
+        .dropzone {
+            border: 2px dashed var(--border-color);
+            background: rgba(15, 23, 42, 0.4);
+            border-radius: var(--radius-md);
+            padding: 3.5rem 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            position: relative;
+            outline: none;
+        }
+
+        .dropzone:hover, .dropzone.dragover {
+            background: rgba(99, 102, 241, 0.03);
+            border-color: var(--primary);
+            box-shadow: 0 0 16px var(--primary-glow);
+        }
+
+        .dropzone input {
+            display: none;
+        }
+
+        .dropzone-icon {
+            color: var(--primary);
+            margin-bottom: 1.25rem;
+            display: inline-flex;
+            background: rgba(99, 102, 241, 0.1);
+            padding: 1.25rem;
+            border-radius: 50%;
+            transition: var(--transition-smooth);
+        }
+
+        .dropzone:hover .dropzone-icon {
+            transform: scale(1.1);
+            background: rgba(99, 102, 241, 0.2);
+        }
+
+        .dropzone-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-bottom: 6px;
+            color: var(--text-main);
+        }
+
+        .dropzone-subtitle {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        /* Textarea custom style */
+        .text-area-container {
+            position: relative;
+        }
+
+        .custom-textarea {
+            width: 100%;
+            height: 180px;
+            background-color: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            color: var(--text-main);
+            font-size: 0.95rem;
+            resize: vertical;
+            outline: none;
+            transition: var(--transition-smooth);
+            line-height: 1.5;
+        }
+
+        .custom-textarea:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-glow);
+            background-color: rgba(15, 23, 42, 0.6);
+        }
+
+        .custom-textarea::placeholder {
+            color: var(--text-muted);
+            opacity: 0.7;
+        }
+
+        /* File / Image Preview components */
+        .preview-container {
+            margin-top: 1.5rem;
+            display: none;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            position: relative;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .preview-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-remove-preview {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition-smooth);
+        }
+
+        .btn-remove-preview:hover {
+            color: var(--error);
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .preview-content {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .preview-image {
+            max-width: 100%;
+            max-height: 280px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            object-fit: contain;
+        }
+
+        .preview-file-details {
+            width: 100%;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            font-size: 0.85rem;
+        }
+
+        .detail-item {
+            background: rgba(255, 255, 255, 0.02);
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .detail-label {
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .detail-value {
+            font-weight: 600;
+            color: var(--text-main);
+            word-break: break-all;
+        }
+
+        /* Action configurations & toggle format */
+        .options-group {
+            margin-top: 2rem;
+            border-top: 1px solid var(--border-color);
+            padding-top: 1.5rem;
+        }
+
+        .options-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 0.75rem;
+        }
+
+        .format-selector {
+            display: flex;
+            gap: 12px;
+        }
+
+        .format-label {
+            flex: 1;
+            border: 1px solid var(--border-color);
+            background: rgba(15, 23, 42, 0.2);
+            padding: 14px;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            transition: var(--transition-smooth);
+        }
+
+        .format-label input {
+            display: none;
+        }
+
+        .format-label:hover {
+            border-color: rgba(99, 102, 241, 0.5);
+            color: var(--text-main);
+        }
+
+        .format-label:has(input:checked) {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--text-main);
+            box-shadow: 0 0 12px rgba(99, 102, 241, 0.08);
+        }
+
+        /* Large Action buttons */
+        .btn-action {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            padding: 18px;
+            background-color: var(--primary);
+            color: #ffffff;
+            border: none;
+            border-radius: var(--radius-md);
+            font-weight: 700;
+            font-size: 1.05rem;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            margin-top: 2rem;
+            box-shadow: 0 4px 14px var(--primary-glow);
+        }
+
+        .btn-action:hover:not(:disabled) {
+            background-color: var(--primary-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.25);
+        }
+
+        .btn-action:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .btn-action:disabled {
+            background-color: #334155;
+            color: #64748b;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        /* Feedback Status Alert System */
+        .status-message {
+            margin-top: 1.5rem;
+            padding: 1.25rem;
+            border-radius: var(--radius-md);
+            font-size: 0.95rem;
+            font-weight: 500;
+            display: none;
+            align-items: flex-start;
+            gap: 12px;
+            line-height: 1.5;
+            animation: fadeIn 0.25s ease-out;
+        }
+
+        .status-message.info { 
+            background: rgba(99, 102, 241, 0.06); 
+            color: #a5b4fc; 
+            border: 1px solid rgba(99, 102, 241, 0.25); 
+        }
+        
+        .status-message.success { 
+            background: var(--success-glow); 
+            color: #6ee7b7; 
+            border: 1px solid rgba(16, 185, 129, 0.25); 
+        }
+        
+        .status-message.error { 
+            background: var(--error-glow); 
+            color: #fca5a5; 
+            border: 1px solid rgba(239, 68, 68, 0.25); 
+        }
+
+        .status-message .spinner {
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-left-color: currentColor;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            animation: spin 1s linear infinite;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .hidden { 
+            display: none !important; 
+        }
+
+        /* Integration Helper Guide Card */
+        .guide-box {
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .guide-box h3 {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-bottom: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .guide-steps {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.25rem;
+        }
+
+        .step {
+            display: flex;
+            gap: 14px;
+            align-items: flex-start;
+        }
+
+        .step-num {
+            background: rgba(99, 102, 241, 0.12);
+            color: #818cf8;
+            font-weight: 800;
+            font-size: 0.85rem;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+        }
+
+        .step-text h4 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 3px;
+        }
+
+        .step-text p {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        /* Mobile Optimization overrides */
+        @media (max-width: 640px) {
+            body {
+                padding: 1.5rem 1rem;
+            }
+            .tabs {
+                grid-template-columns: 1fr;
+            }
+            .card {
+                padding: 1.5rem;
+            }
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Back to dashboard linkage -->
+    <a href="/" class="back-link">
+        <i data-lucide="arrow-left" style="width: 18px; height: 18px;"></i> Return to Local Call Center
+    </a>
+
+    <div class="header">
+        <h1>Campaign Data Companion</h1>
+        <p>Translate images, unformatted notes, or messy rosters into clean call sheets</p>
+    </div>
+
+    <!-- TABS CONFIGURATION -->
+    <div class="tabs">
+        <button id="tab-ocr" class="tab-btn active" onclick="switchTab('ocr')">
+            <i data-lucide="camera" style="width: 18px; height: 18px;"></i> Image OCR
+        </button>
+        <button id="tab-paste" class="tab-btn" onclick="switchTab('paste')">
+            <i data-lucide="align-left" style="width: 18px; height: 18px;"></i> Text Paste
+        </button>
+        <button id="tab-sanitize" class="tab-btn" onclick="switchTab('sanitize')">
+            <i data-lucide="file-spreadsheet" style="width: 18px; height: 18px;"></i> Sheet Normalizer
+        </button>
+    </div>
+
+    <!-- MAIN CONVERSION CARD -->
+    <div class="card">
+        
+        <!-- PANEL A: HANDWRITTEN / IMAGE OCR PIPELINE -->
+        <div id="panel-ocr" class="panel">
+            <h2>Image OCR Engine</h2>
+            <p class="description">Upload a crisp photo of printed or hand-written signup sheets. The Edge Vision AI scans names and extracts contact phone numbers.</p>
+            
+            <div class="dropzone" id="dropzone-ocr" role="button" tabindex="0">
+                <input type="file" id="file-ocr" accept="image/*" capture="environment">
+                <div class="dropzone-icon"><i data-lucide="camera" style="width: 24px; height: 24px;"></i></div>
+                <p class="dropzone-title">Upload Photo or Scan Page</p>
+                <p class="dropzone-subtitle">Drag & drop here or click to capture. Supports JPG, PNG.</p>
+            </div>
+
+            <div class="preview-container" id="preview-ocr">
+                <div class="preview-header">
+                    <span class="preview-title"><i data-lucide="image" style="width: 16px; height: 16px;"></i> Photo Preview</span>
+                    <button class="btn-remove-preview" onclick="clearSelectedInput()" title="Clear selection">
+                        <i data-lucide="x" style="width: 16px; height: 16px;"></i>
+                    </button>
+                </div>
+                <div class="preview-content">
+                    <img id="img-ocr-display" class="preview-image" src="#" alt="Upload preview">
+                </div>
+            </div>
+        </div>
+
+        <!-- PANEL B: TEXT PASTE PIPELINE -->
+        <div id="panel-paste" class="panel hidden">
+            <h2>Text Paste Extractor</h2>
+            <p class="description">Copy and paste unstructured lists, chat histories, or email notes containing names and numbers. The AI isolates names and standardizes contact details.</p>
+            
+            <div class="text-area-container">
+                <textarea id="text-paste-input" class="custom-textarea" 
+                          placeholder="Paste your raw text list here...&#10;For example:&#10;Pastor Jim: 072-333-4444&#10;Brother John 987654321&#10;Sister Sally (+254711223344)"
+                          oninput="validateTextPasteInput()"></textarea>
+            </div>
+        </div>
+
+        <!-- PANEL C: SHEET NORMALIZER PIPELINE -->
+        <div id="panel-sanitize" class="panel hidden">
+            <h2>Spreadsheet Sanitization Helper</h2>
+            <p class="description">Upload columns with problematic naming or numbers. The AI parses the first 200 rows, extracts names, and strips spaces, hyphens, and brackets from phone numbers.</p>
+            
+            <div class="dropzone" id="dropzone-sanitize" role="button" tabindex="0">
+                <input type="file" id="file-sanitize" accept=".csv,.xlsx,.xls">
+                <div class="dropzone-icon"><i data-lucide="file-spreadsheet" style="width: 24px; height: 24px;"></i></div>
+                <p class="dropzone-title">Select Messy Spreadsheet</p>
+                <p class="dropzone-subtitle">Drag & drop CSV or Excel formats here. Max size 10MB.</p>
+            </div>
+
+            <div class="preview-container" id="preview-sanitize">
+                <div class="preview-header">
+                    <span class="preview-title"><i data-lucide="table" style="width: 16px; height: 16px;"></i> Spreadsheet Loaded</span>
+                    <button class="btn-remove-preview" onclick="clearSelectedInput()" title="Clear selection">
+                        <i data-lucide="x" style="width: 16px; height: 16px;"></i>
+                    </button>
+                </div>
+                <div class="preview-file-details">
+                    <div class="detail-item">
+                        <div class="detail-label">File Name</div>
+                        <div id="sanitize-filename" class="detail-value">-</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Total Rows</div>
+                        <div id="sanitize-rowcount" class="detail-value">-</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Sanitizing Sample</div>
+                        <div id="sanitize-sampleinfo" class="detail-value">First 200 rows</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DOWNLOAD COMPILATION OPTIONS -->
+        <div class="options-group">
+            <p class="options-title">Output Download Format:</p>
+            <div class="format-selector">
+                <label class="format-label">
+                    <input type="radio" name="output-format" value="xlsx" checked>
+                    <i data-lucide="file-spreadsheet" style="color: var(--success); width: 18px; height: 18px;"></i> Microsoft Excel (.xlsx)
+                </label>
+                <label class="format-label">
+                    <input type="radio" name="output-format" value="csv">
+                    <i data-lucide="file-text" style="color: var(--primary); width: 18px; height: 18px;"></i> Comma Separated (.csv)
+                </label>
+            </div>
+        </div>
+
+        <!-- PIPELINE TRIGGER BUTTON -->
+        <button id="btn-submit" class="btn-action" disabled onclick="executeProcessingPipeline()">
+            <i data-lucide="play" style="width: 18px; height: 18px;"></i> Extract & Download Clean File
+        </button>
+
+        <!-- LIVE NOTIFICATION ALERTS -->
+        <div id="alert-status" class="status-message"></div>
+    </div>
+
+    <!-- QUICK USER INTEGRATION GUIDE -->
+    <div class="guide-box">
+        <h3><i data-lucide="help-circle" style="width: 20px; height: 20px; color: var(--primary);"></i> How it works</h3>
+        <div class="guide-steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-text">
+                    <h4>Submit Roster Source</h4>
+                    <p>Provide an image scan, paste simple chat records, or drop in messy Excel/CSV files directly into the workspaces above.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-text">
+                    <h4>Serverless Edge Processing</h4>
+                    <p>The companion utilizes serverless Cloudflare Workers AI to interpret visual data, clean messy naming schemes, and normalize phone numbers.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-text">
+                    <h4>Import Back to Call Center</h4>
+                    <p>Click "Return to Local Call Center", drag in your freshly downloaded clean file, and start connecting with individuals instantly.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Cloudflare Workers AI Endpoint
+    const API_ENDPOINT = '/api/companion-process';
+
+    let currentTab = 'ocr';
+    let loadedImageBase64 = null;
+    let parsedSheetRows = null;
+    let parsedSheetFilename = null;
+
+    // Load Lucide Icons
+    window.addEventListener('DOMContentLoaded', () => {
+        lucide.createIcons();
+        setupDragAndDrop();
+    });
+
+    // Tab Switcher
+    function switchTab(tab) {
+        if (currentTab === tab) return;
+        currentTab = tab;
+        
+        // Active buttons
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(`tab-${tab}`).classList.add('active');
+
+        // Toggle Panels
+        document.querySelectorAll('.panel').forEach(panel => panel.classList.add('hidden'));
+        document.getElementById(`panel-${tab}`).classList.remove('hidden');
+
+        // Reset state
+        clearSelectedInput();
+    }
+
+    // Reset current active page status
+    function clearSelectedInput() {
+        loadedImageBase64 = null;
+        parsedSheetRows = null;
+        parsedSheetFilename = null;
+
+        // Reset OCR uploads
+        document.getElementById('file-ocr').value = '';
+        document.getElementById('img-ocr-display').src = '#';
+        document.getElementById('preview-ocr').style.display = 'none';
+
+        // Reset Text Paste
+        document.getElementById('text-paste-input').value = '';
+
+        // Reset Spreadsheet normalizer uploads
+        document.getElementById('file-sanitize').value = '';
+        document.getElementById('preview-sanitize').style.display = 'none';
+        document.getElementById('sanitize-filename').innerText = '-';
+        document.getElementById('sanitize-rowcount').innerText = '-';
+
+        // Reset Buttons & Alerts
+        document.getElementById('btn-submit').disabled = true;
+        hideAlert();
+    }
+
+    // Set Drag & Drop listeners
+    function setupDragAndDrop() {
+        const dropzones = [
+            { id: 'dropzone-ocr', inputId: 'file-ocr', handler: handleOCRFileSelection },
+            { id: 'dropzone-sanitize', inputId: 'file-sanitize', handler: handleSpreadsheetFileSelection }
+        ];
+
+        dropzones.forEach(dz => {
+            const el = document.getElementById(dz.id);
+            const input = document.getElementById(dz.inputId);
+
+            if (!el || !input) return;
+
+            // Click zone to open browse dialog
+            el.addEventListener('click', () => input.click());
+
+            // Key press compatibility
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    input.click();
+                }
+            });
+
+            // Drag Events
+            el.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                el.classList.add('dragover');
+            });
+
+            el.addEventListener('dragleave', () => {
+                el.classList.remove('dragover');
+            });
+
+            el.addEventListener('drop', (e) => {
+                e.preventDefault();
+                el.classList.remove('dragover');
+                if (e.dataTransfer.files.length > 0) {
+                    input.files = e.dataTransfer.files;
+                    dz.handler(input.files[0]);
+                }
+            });
+
+            input.addEventListener('change', () => {
+                if (input.files.length > 0) {
+                    dz.handler(input.files[0]);
+                }
+            });
+        });
+    }
+
+    // Handle OCR Image Files
+    function handleOCRFileSelection(file) {
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            showAlert('Please select an image file (PNG, JPG, WEBP).', 'error');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            document.getElementById('img-ocr-display').src = e.target.result;
+            document.getElementById('preview-ocr').style.display = 'block';
+            
+            // Extract pure base64 representation without data:image prefix
+            loadedImageBase64 = e.target.result.split(',')[1];
+            
+            document.getElementById('btn-submit').disabled = false;
+            showAlert('Roster image loaded. Ready to run Cloud Vision OCR.', 'info');
+        };
+        reader.readAsDataURL(file);
+    }
+
+    // Handle Text Paste Validation
+    function validateTextPasteInput() {
+        const text = document.getElementById('text-paste-input').value.trim();
+        const button = document.getElementById('btn-submit');
+        
+        if (text.length > 5) {
+            button.disabled = false;
+            hideAlert();
+        } else {
+            button.disabled = true;
+        }
+    }
+
+    // Handle Excel/CSV Local Parsing via SheetJS
+    async function handleSpreadsheetFileSelection(file) {
+        if (!file) return;
+        const name = file.name.toLowerCase();
+        if (!name.endsWith('.csv') && !name.endsWith('.xlsx') && !name.endsWith('.xls')) {
+            showAlert('Spreadsheet must be a CSV or Excel (.xlsx, .xls) file.', 'error');
+            return;
+        }
+
+        parsedSheetFilename = file.name;
+        showAlert('Parsing spreadsheet file locally...', 'info');
+
+        try {
+            const buffer = await file.arrayBuffer();
+            const workbook = XLSX.read(buffer, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            
+            // Parse to raw array of arrays or array of objects
+            const jsonRows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+            
+            if (jsonRows.length === 0) {
+                throw new Error('Spreadsheet appears to have no rows of data.');
+            }
+
+            parsedSheetRows = jsonRows;
+            
+            document.getElementById('sanitize-filename').innerText = file.name;
+            document.getElementById('sanitize-rowcount').innerText = `${jsonRows.length} rows`;
+            document.getElementById('preview-sanitize').style.display = 'block';
+            document.getElementById('btn-submit').disabled = false;
+
+            showAlert(`Loaded ${file.name} successfully. Ready to run sanitization pipeline.`, 'info');
+        } catch (err) {
+            console.error(err);
+            showAlert(`Parsing error: ${err.message}`, 'error');
+            clearSelectedInput();
+        }
+    }
+
+    // UI Alert Manager
+    function showAlert(msg, type) {
+        const alertBox = document.getElementById('alert-status');
+        if (!alertBox) return;
+
+        let iconMarkup = '';
+        if (type === 'info') {
+            if (msg.includes('processing') || msg.includes('Parsing')) {
+                iconMarkup = '<div class="spinner"></div>';
+            } else {
+                iconMarkup = '<i data-lucide="info" style="width: 18px; height: 18px; flex-shrink: 0;"></i>';
+            }
+        } else if (type === 'success') {
+            iconMarkup = '<i data-lucide="check-circle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>';
+        } else if (type === 'error') {
+            iconMarkup = '<i data-lucide="alert-triangle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>';
+        }
+
+        alertBox.className = `status-message ${type}`;
+        alertBox.innerHTML = `${iconMarkup}<span>${msg}</span>`;
+        alertBox.style.display = 'flex';
+        lucide.createIcons({ attrs: { class: 'lucide-icon' } });
+    }
+
+    function hideAlert() {
+        const alertBox = document.getElementById('alert-status');
+        if (alertBox) alertBox.style.display = 'none';
+    }
+
+    // Execute Worker AI Processes
+    async function executeProcessingPipeline() {
+        const submitBtn = document.getElementById('btn-submit');
+        submitBtn.disabled = true;
+        showAlert('Cloud AI is currently processing your data. This can take up to 25 seconds...', 'info');
+
+        try {
+            let payload = {};
+
+            if (currentTab === 'ocr') {
+                if (!loadedImageBase64) throw new Error('No image loaded.');
+                payload = {
+                    action: 'ocr',
+                    image: loadedImageBase64
+                };
+            } else if (currentTab === 'paste') {
+                const text = document.getElementById('text-paste-input').value.trim();
+                if (!text) throw new Error('No text paste data found.');
+                payload = {
+                    action: 'parse_text',
+                    text: text
+                };
+            } else if (currentTab === 'sanitize') {
+                if (!parsedSheetRows || parsedSheetRows.length === 0) throw new Error('No sheet rows parsed.');
+                
+                // Extract first 200 rows as requested to optimize context limits
+                const dataSlice = parsedSheetRows.slice(0, 200);
+                payload = {
+                    action: 'sanitize',
+                    data: dataSlice
+                };
+            }
+
+            // POST to Worker API
+            const response = await fetch(API_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || `Server responded with code ${response.status}`);
+            }
+
+            const result = await response.json();
+            
+            if (!result.data || !Array.isArray(result.data)) {
+                throw new Error('AI returned an invalid or empty data format.');
+            }
+
+            if (result.data.length === 0) {
+                throw new Error('No contact records could be extracted from this payload.');
+            }
+
+            // Download clean roster
+            downloadRosterFile(result.data);
+            showAlert(`Roster clean up complete! Successfully processed and downloaded ${result.data.length} records.`, 'success');
+            submitBtn.disabled = false;
+
+        } catch (err) {
+            console.error(err);
+            showAlert(`AI Pipeline Failed: ${err.message}`, 'error');
+            submitBtn.disabled = false;
+        }
+    }
+
+    // Compile and download Excel/CSV locally using SheetJS
+    function downloadRosterFile(data) {
+        const format = document.querySelector('input[name="output-format"]:checked').value;
+        
+        // Transform keys to uppercase/standardized for call center loading
+        // Format expected: [{"name": "...", "phone": "..."}]
+        const mappedData = data.map(item => ({
+            'Name': item.name || '',
+            'Phone': item.phone || ''
+        }));
+
+        const worksheet = XLSX.utils.json_to_sheet(mappedData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Call Roster");
+
+        const dateString = new Date().toISOString().split('T')[0];
+        const filename = `Cleaned_Roster_${dateString}`;
+
+        if (format === 'xlsx') {
+            XLSX.writeFile(workbook, `${filename}.xlsx`);
+        } else {
+            XLSX.writeFile(workbook, `${filename}.csv`, { bookType: 'csv' });
+        }
+    }
+</script>
+
+</body>
+</html>

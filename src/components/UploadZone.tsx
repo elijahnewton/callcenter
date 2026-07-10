@@ -163,6 +163,48 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
         </div>
       </div>
 
+      {/* AI Roster Companion Link Banner */}
+      <div style={{
+        background: '#eff6ff',
+        borderRadius: '12px',
+        padding: '1.25rem',
+        border: '1px solid #bfdbfe',
+        marginBottom: '2.5rem',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '1rem'
+      }}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flex: '1', minWidth: '280px' }}>
+          <div style={{ color: 'var(--primary)', display: 'flex', background: '#dbeafe', padding: '0.5rem', borderRadius: '50%' }}>
+            <FileSpreadsheet size={20} />
+          </div>
+          <div>
+            <h4 style={{ fontSize: '0.925rem', fontWeight: 700, color: 'var(--neutral-900)' }}>Need to scan or format a roster?</h4>
+            <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem' }}>
+              Use our AI Companion to extract contacts from handwriting pictures, paste unformatted text lists, or normalize messy spreadsheets.
+            </p>
+          </div>
+        </div>
+        <a href="/utility_companion.html" style={{
+          background: 'var(--primary)',
+          color: '#ffffff',
+          padding: '0.6rem 1.2rem',
+          borderRadius: '8px',
+          textDecoration: 'none',
+          fontSize: '0.875rem',
+          fontWeight: 600,
+          whiteSpace: 'nowrap',
+          boxShadow: '0 2px 4px rgba(79, 70, 229, 0.1)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          transition: 'all 0.2s ease'
+        }}>
+          Open AI Companion →
+        </a>
+      </div>
+
       {/* Explanatory Guide Box */}
       <div style={{ background: '#ffffff', borderRadius: '12px', padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid var(--neutral-200)' }}>
         <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--neutral-800)', borderBottom: '1px solid var(--neutral-200)', paddingBottom: '0.5rem' }}>
