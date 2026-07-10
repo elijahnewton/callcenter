@@ -1,0 +1,7 @@
+name = "callcenter-ai1"
+main = "companion-utility/index.ts"
+compatibility_date = "2026-07-10"
+
+# Add this binding
+[ai]
+binding = "AI"
