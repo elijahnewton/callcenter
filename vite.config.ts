@@ -1,42 +1,17 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import { VitePWA } from 'vite-plugin-pwa';
+import Dexie, { type Table } from 'dexie';
+import type { CampaignRecord, SessionEntry } from '../types';
 
-export default defineConfig({
-  plugins: [
-    react(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      manifestFilename: 'site.webmanifest',
-      includeAssets: ['icons/icon-192.svg', 'icons/icon-512.svg'],
-      manifest: {
-        name: 'Church Call Center Assistant',
-        short_name: 'Church Calls',
-        start_url: '/',
-        scope: '/',
-        display: 'standalone',
-        background_color: '#ffffff',
-        theme_color: '#4f46e5',
-        orientation: 'portrait-primary',
-        description: 'Offline-first church call center assistant.',
-        icons: [
-          {
-            src: '/icons/icon-192.svg',
-            sizes: '192x192',
-            type: 'image/svg+xml',
-            purpose: 'any maskable',
-          },
-          {
-            src: '/icons/icon-512.svg',
-            sizes: '512x512',
-            type: 'image/svg+xml',
-            purpose: 'any maskable',
-          },
-        ],
-      },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,woff,ttf}'],
-      },
-    }),
-  ],
-});
+class CallCenterDatabase extends Dexie {
+  records!: Table<CampaignRecord, number>;
+  session!: Table<SessionEntry, string>;
+
+  constructor() {
+    super('ChurchCallCenter');
+    this.version(1).stores({
+      records: 'id,congregantId,status,name,phone',
+      session: 'key',
+    });
+  }
+}
+
+export const db = new CallCenterDatabase();

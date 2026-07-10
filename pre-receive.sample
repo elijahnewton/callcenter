@@ -1,0 +1,4 @@
+# pack-refs with: peeled fully-peeled sorted 
+f4935bf6bd1f3e0b2eb6201ef1e1a48b54d8d7cc refs/remotes/origin/cloudflare/workers-autoconfig
+3bdb9de52eeb48797f087a30897d64d2892c77cf refs/remotes/origin/copilot/transform-html-react-app
+9ec8a97e37cae4149f074d09693d73fd2eebf72a refs/remotes/origin/main
