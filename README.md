@@ -4,7 +4,7 @@ An offline-first, privacy-respecting campaign manager designed for church follow
 
 ---
 
-## System Architecture.
+## System Architecture
 
 ```mermaid
 graph TD
