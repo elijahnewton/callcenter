@@ -1,312 +1,272 @@
-:root {
-    --primary: #4f46e5;
-    --primary-hover: #4338ca;
-    --success: #10b981;
-    --warning: #f59e0b;
-    --danger: #ef4444;
-    --neutral-50: #f8fafc;
-    --neutral-100: #f1f5f9;
-    --neutral-200: #e2e8f0;
-    --neutral-300: #cbd5e1;
-    --neutral-600: #475569;
-    --neutral-700: #334155;
-    --neutral-800: #1e293b;
-    --neutral-900: #0f172a;
-    --radius: 16px;
-}
+import React, { useState, useRef, ChangeEvent } from 'react';
+import * as XLSX from 'xlsx';
+import { ArrowLeft, Camera, Sparkles, FileSpreadsheet, FileText, Play, Info } from 'lucide-react';
+import './CampaignCompanion.css'; // Make sure to save the CSS file below
 
-.campaign-body {
-    background-color: var(--neutral-50);
-    color: var(--neutral-900);
-    line-height: 1.6;
-    padding: 2rem 1rem;
-    display: flex;
-    justify-content: center;
-    min-height: 100vh;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-}
+// Replace this with the actual URL/path to your local AI handler endpoint
+const LOCAL_API_ENDPOINT = '/api/companion-utility'; 
 
-.campaign-body * {
-    box-sizing: border-box;
-}
+export default function CampaignCompanion() {
+    const [activeTab, setActiveTab] = useState<'ocr' | 'sanitize'>('ocr');
+    
+    // File & Data States
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [imageBase64, setImageBase64] = useState<string | null>(null);
+    const [imagePreview, setImagePreview] = useState<string | null>(null);
+    const [outputFormat, setOutputFormat] = useState<'xlsx' | 'csv'>('xlsx');
+    
+    // UI States
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [status, setStatus] = useState<{ message: string; type: 'info' | 'success' | 'error' | '' }>({ message: '', type: '' });
 
-.campaign-body .container {
-    width: 100%;
-    max-width: 800px;
-}
+    // Refs for hidden file inputs
+    const ocrInputRef = useRef<HTMLInputElement>(null);
+    const sanitizeInputRef = useRef<HTMLInputElement>(null);
 
-.campaign-body .back-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--primary);
-    text-decoration: none;
-    font-size: 0.9rem;
-    font-weight: 600;
-    margin-bottom: 2rem;
-    transition: transform 0.2s ease;
-}
+    const switchTab = (tab: 'ocr' | 'sanitize') => {
+        setActiveTab(tab);
+        setSelectedFile(null);
+        setImageBase64(null);
+        setImagePreview(null);
+        setStatus({ message: '', type: '' });
+    };
 
-.campaign-body .back-link:hover {
-    transform: translateX(-4px);
-}
+    const handleImageSelection = (e: ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
 
-.campaign-body .header {
-    margin-bottom: 2.5rem;
-    text-align: center;
-}
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const result = event.target?.result as string;
+            setImagePreview(result);
+            setImageBase64(result.split(',')[1]); // Extract base64 part
+            setStatus({ message: 'Image parsed successfully. Ready to run AI OCR pipeline.', type: 'info' });
+        };
+        reader.readAsDataURL(file);
+    };
 
-.campaign-body .header h1 {
-    font-size: 2.25rem;
-    color: var(--neutral-900);
-    font-weight: 800;
-    letter-spacing: -0.025em;
-    margin-bottom: 0.5rem;
-}
+    const handleSheetSelection = (e: ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
 
-.campaign-body .header p {
-    color: var(--neutral-600);
-    font-size: 1.05rem;
-}
+        setSelectedFile(file);
+        setStatus({ message: `Loaded ${file.name}. Ready to normalize roster properties.`, type: 'info' });
+    };
 
-.campaign-body .tabs {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    background: var(--neutral-100);
-    padding: 6px;
-    border-radius: 12px;
-    margin-bottom: 2rem;
-    border: 1px solid var(--neutral-200);
-}
+    const triggerLocalDownload = (data: any[]) => {
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Campaign List");
 
-.campaign-body .tab-btn {
-    background: transparent;
-    border: none;
-    padding: 12px;
-    font-size: 0.95rem;
-    font-weight: 700;
-    cursor: pointer;
-    color: var(--neutral-600);
-    border-radius: 8px;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-}
+        const dateStr = new Date().toISOString().slice(0, 10);
 
-.campaign-body .tab-btn.active {
-    background: white;
-    color: var(--neutral-900);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-}
+        if (outputFormat === 'xlsx') {
+            XLSX.writeFile(workbook, `Cleaned_Campaign_${dateStr}.xlsx`);
+        } else {
+            XLSX.writeFile(workbook, `Cleaned_Campaign_${dateStr}.csv`, { bookType: 'csv' });
+        }
+    };
 
-.campaign-body .card {
-    background: white;
-    border-radius: var(--radius);
-    border: 1px solid var(--neutral-200);
-    padding: 2.5rem;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.02), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
-    margin-bottom: 2rem;
-}
+    const executeProcessorPipeline = async () => {
+        setIsProcessing(true);
+        setStatus({ message: 'Local AI is currently processing your data. This may take a moment...', type: 'info' });
 
-.campaign-body .card h2 {
-    font-size: 1.5rem;
-    font-weight: 800;
-    margin-bottom: 0.5rem;
-    color: var(--neutral-800);
-}
+        try {
+            let parsedResultJson: any[] = [];
 
-.campaign-body .card p.description {
-    color: var(--neutral-600);
-    font-size: 0.95rem;
-    margin-bottom: 2rem;
-}
+            if (activeTab === 'ocr') {
+                if (!imageBase64) throw new Error("No image selected");
+                
+                const response = await fetch(LOCAL_API_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'ocr',
+                        image: imageBase64
+                    })
+                });
 
-.campaign-body .dropzone {
-    border: 2px dashed var(--primary);
-    background: #f8fafc;
-    border-radius: 12px;
-    padding: 3rem 1.5rem;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
+                if (!response.ok) throw new Error('OCR transaction failed.');
+                const result = await response.json();
+                parsedResultJson = result.data;
 
-.campaign-body .dropzone:hover {
-    background: #eef2ff;
-    border-color: var(--primary-hover);
-}
+            } else {
+                if (!selectedFile) throw new Error("No file selected");
 
-.campaign-body .dropzone input {
-    display: none;
-}
+                // Pre-parse the dirty sheet to a raw text format
+                const buffer = await selectedFile.arrayBuffer();
+                const workbook = XLSX.read(buffer, { type: 'array' });
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rawRows = XLSX.utils.sheet_to_json(worksheet);
 
-.campaign-body .dropzone-icon {
-    color: var(--primary);
-    margin-bottom: 1rem;
-    display: inline-flex;
-    background: #eef2ff;
-    padding: 1rem;
-    border-radius: 50%;
-}
+                const response = await fetch(LOCAL_API_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'sanitize',
+                        data: rawRows
+                    })
+                });
 
-.campaign-body .preview-container {
-    margin-top: 1.5rem;
-    text-align: center;
-    background: var(--neutral-50);
-    padding: 1rem;
-    border-radius: 8px;
-    border: 1px dashed var(--neutral-300);
-}
+                if (!response.ok) throw new Error('Normalization request rejected.');
+                const result = await response.json();
+                parsedResultJson = result.data;
+            }
 
-.campaign-body .preview-image {
-    max-width: 100%;
-    max-height: 250px;
-    border-radius: 8px;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-}
+            if (!parsedResultJson || parsedResultJson.length === 0) {
+                throw new Error('AI was unable to extract any structured records from the input.');
+            }
 
-.campaign-body .options-group {
-    margin-top: 2rem;
-    border-top: 1px solid var(--neutral-200);
-    padding-top: 1.5rem;
-}
+            triggerLocalDownload(parsedResultJson);
+            setStatus({ message: `Success! Extracted ${parsedResultJson.length} normalized records.`, type: 'success' });
 
-.campaign-body .options-title {
-    font-size: 0.95rem;
-    font-weight: 700;
-    color: var(--neutral-800);
-    margin-bottom: 0.75rem;
-}
+        } catch (error: any) {
+            console.error(error);
+            setStatus({ message: `Operation Failed: ${error.message}. Please try again.`, type: 'error' });
+        } finally {
+            setIsProcessing(false);
+        }
+    };
 
-.campaign-body .format-selector {
-    display: flex;
-    gap: 12px;
-}
+    const isSubmitDisabled = isProcessing || (activeTab === 'ocr' && !imageBase64) || (activeTab === 'sanitize' && !selectedFile);
 
-.campaign-body .format-label {
-    flex: 1;
-    border: 2px solid var(--neutral-200);
-    padding: 12px;
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    font-weight: 700;
-    font-size: 0.9rem;
-    transition: all 0.2s ease;
-}
+    return (
+        <div className="campaign-body">
+            <div className="container">
+                <a href="/" className="back-link">
+                    <ArrowLeft size={18} /> Return to Local Call Center
+                </a>
 
-.campaign-body .format-label input {
-    display: none;
-}
+                <div className="header">
+                    <h1>Campaign Data Companion</h1>
+                    <p>Convert handwriting photos or format problematic rosters using local AI</p>
+                </div>
 
-.campaign-body .format-label:has(input:checked) {
-    border-color: var(--primary);
-    background: #eff6ff;
-    color: var(--primary);
-}
+                <div className="tabs">
+                    <button 
+                        className={`tab-btn ${activeTab === 'ocr' ? 'active' : ''}`} 
+                        onClick={() => switchTab('ocr')}
+                    >
+                        <Camera size={18} /> Image OCR Engine
+                    </button>
+                    <button 
+                        className={`tab-btn ${activeTab === 'sanitize' ? 'active' : ''}`} 
+                        onClick={() => switchTab('sanitize')}
+                    >
+                        <Sparkles size={18} /> Clean & Normalize Sheet
+                    </button>
+                </div>
 
-.campaign-body .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    width: 100%;
-    padding: 1rem;
-    background-color: var(--primary);
-    color: white;
-    border: none;
-    border-radius: 10px;
-    font-weight: 700;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    margin-top: 2rem;
-    box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2);
-}
+                <div className="card">
+                    {/* PANEL A: HANDWRITTEN PHOTO EXTRACTION */}
+                    {activeTab === 'ocr' && (
+                        <div id="panel-ocr">
+                            <h2>Handwritten List Extractor</h2>
+                            <p className="description">Snap a sharp photo of pen-and-paper sign-up lists, cell group cards, or rosters. The AI reads names and phone numbers directly from the picture and compiles them.</p>
 
-.campaign-body .btn:hover:not(:disabled) {
-    background-color: var(--primary-hover);
-    transform: translateY(-1px);
-}
+                            <div className="dropzone" onClick={() => ocrInputRef.current?.click()}>
+                                <input type="file" ref={ocrInputRef} accept="image/*" onChange={handleImageSelection} />
+                                <div className="dropzone-icon"><Camera size={24} /></div>
+                                <p style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '4px' }}>Capture Photo or Select Image</p>
+                                <p style={{ fontSize: '0.85rem', color: 'var(--neutral-600)' }}>Supports JPG, PNG formats up to 5MB</p>
+                            </div>
 
-.campaign-body .btn:disabled {
-    background-color: var(--neutral-200);
-    color: var(--neutral-600);
-    cursor: not-allowed;
-    box-shadow: none;
-}
+                            {imagePreview && (
+                                <div className="preview-container" style={{ display: 'block' }}>
+                                    <p style={{ fontSize: '0.8rem', marginBottom: '8px', fontWeight: 700, color: 'var(--neutral-700)' }}>Selected Roster Image:</p>
+                                    <img className="preview-image" src={imagePreview} alt="Upload preview" />
+                                </div>
+                            )}
+                        </div>
+                    )}
 
-.campaign-body .status-message {
-    margin-top: 1.5rem;
-    padding: 1rem;
-    border-radius: 10px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    align-items: flex-start;
-    gap: 10px;
-}
+                    {/* PANEL B: SHEET CLEANER & NORMALIZER */}
+                    {activeTab === 'sanitize' && (
+                        <div id="panel-sanitize">
+                            <h2>Roster Normalization Helper</h2>
+                            <p className="description">Upload problematic, broken, or weirdly formatted CSV/XLSX lists. The AI identifies conjoined names, isolates contact telephone numbers, and formats properties cleanly.</p>
 
-.campaign-body .status-message.info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
-.campaign-body .status-message.success { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
-.campaign-body .status-message.error { background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
+                            <div className="dropzone" onClick={() => sanitizeInputRef.current?.click()}>
+                                <input type="file" ref={sanitizeInputRef} accept=".csv,.xlsx,.xls" onChange={handleSheetSelection} />
+                                <div className="dropzone-icon"><FileSpreadsheet size={24} /></div>
+                                <p style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '4px' }}>Select Dirty Spreadsheet</p>
+                                <p style={{ fontSize: '0.85rem', color: 'var(--neutral-600)' }}>Supports CSV, XLSX up to 10MB</p>
+                            </div>
+                        </div>
+                    )}
 
-.campaign-body .guide-box {
-    background: #ffffff;
-    border-radius: var(--radius);
-    padding: 2rem;
-    border: 1px solid var(--neutral-200);
-}
+                    {/* EXPORT COMPILATION CONFIGURATIONS */}
+                    <div className="options-group">
+                        <p className="options-title">Select Download Output File Format:</p>
+                        <div className="format-selector">
+                            <label className="format-label">
+                                <input 
+                                    type="radio" 
+                                    name="output-format" 
+                                    value="xlsx" 
+                                    checked={outputFormat === 'xlsx'} 
+                                    onChange={() => setOutputFormat('xlsx')} 
+                                />
+                                <FileSpreadsheet size={18} style={{ color: 'var(--success)' }} /> Microsoft Excel (.xlsx)
+                            </label>
+                            <label className="format-label">
+                                <input 
+                                    type="radio" 
+                                    name="output-format" 
+                                    value="csv" 
+                                    checked={outputFormat === 'csv'} 
+                                    onChange={() => setOutputFormat('csv')} 
+                                />
+                                <FileText size={18} style={{ color: 'var(--primary)' }} /> Plain CSV (.csv)
+                            </label>
+                        </div>
+                    </div>
 
-.campaign-body .guide-box h3 {
-    font-size: 1.1rem;
-    font-weight: 800;
-    color: var(--neutral-800);
-    margin-bottom: 1rem;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
+                    {/* SUBMIT & TRIGGER ACTIONS */}
+                    <button 
+                        className="btn" 
+                        disabled={isSubmitDisabled} 
+                        onClick={executeProcessorPipeline}
+                    >
+                        <Play size={18} /> {isProcessing ? 'Processing...' : 'Analyze & Export Clean File'}
+                    </button>
 
-.campaign-body .guide-steps {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 1rem;
-}
+                    {/* PROCESS FEEDBACK ALERTS */}
+                    {status.message && (
+                        <div className={`status-message ${status.type}`} style={{ display: 'flex' }}>
+                            {status.message}
+                        </div>
+                    )}
+                </div>
 
-.campaign-body .step {
-    display: flex;
-    gap: 12px;
-    align-items: flex-start;
-}
-
-.campaign-body .step-num {
-    background: #eef2ff;
-    color: var(--primary);
-    font-weight: 800;
-    font-size: 0.85rem;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
-.campaign-body .step-text h4 {
-    font-size: 0.95rem;
-    font-weight: 700;
-    color: var(--neutral-900);
-}
-
-.campaign-body .step-text p {
-    font-size: 0.85rem;
-    color: var(--neutral-600);
-    margin-top: 2px;
+                {/* OPERATIONAL USER GUIDE */}
+                <div className="guide-box">
+                    <h3><Info size={20} /> Quick Integration Guide</h3>
+                    <div className="guide-steps">
+                        <div className="step">
+                            <div className="step-num">1</div>
+                            <div className="step-text">
+                                <h4>Convert Roster Offline</h4>
+                                <p>Upload handwritten lists or messy formats. The AI processes inputs and automatically creates structural records matching 'Name' and 'Phone'.</p>
+                            </div>
+                        </div>
+                        <div className="step">
+                            <div className="step-num">2</div>
+                            <div className="step-text">
+                                <h4>Download Your Clean File</h4>
+                                <p>Choose either standard .xlsx or .csv output formats. Tapping execute starts an automatic download process.</p>
+                            </div>
+                        </div>
+                        <div className="step">
+                            <div className="step-num">3</div>
+                            <div className="step-text">
+                                <h4>Import directly to Call Center workspace</h4>
+                                <p>Return to the main local browser application screen, drop in the compiled export file, and start follow-up calls immediately.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
 }
