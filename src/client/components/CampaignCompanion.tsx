@@ -1,280 +1,486 @@
-import React, { useState, useRef, ChangeEvent } from 'react';
-import * as XLSX from 'xlsx';
-import { ArrowLeft, Camera, Sparkles, FileSpreadsheet, FileText, Play, Info } from 'lucide-react';
-import './CampaignCompanion.css';
 
-interface CampaignCompanionProps {
-  onBack: () => void;
+import { Hono, Context } from 'hono';
+import { cors } from 'hono/cors';
+
+// ============================================================================
+// Types & Interfaces
+// ============================================================================
+
+interface Bindings {
+  AI: Env['AI'];
 }
 
-// Relative endpoint matching our Hono route!
-const LOCAL_API_ENDPOINT = '/api/companion';
+interface Env {
+  AI: any;
+}
 
-export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
-  const [activeTab, setActiveTab] = useState<'ocr' | 'sanitize'>('ocr');
-  const [channel, setChannel] = useState<'sms' | 'email' | 'call'>('sms');
+interface Contact {
+  name: string;
+  email: string;
+  phone: string;
+}
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [outputFormat, setOutputFormat] = useState<'xlsx' | 'csv'>('xlsx');
+interface SanitizedContact extends Contact {
+  status: 'valid' | 'invalid';
+  notes: string;
+}
 
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [status, setStatus] = useState<{ message: string; type: 'info' | 'success' | 'error' | '' }>({ message: '', type: '' });
+interface OCRRequest {
+  action: 'ocr';
+  image: string;
+}
 
-  const ocrInputRef = useRef<HTMLInputElement>(null);
-  const sanitizeInputRef = useRef<HTMLInputElement>(null);
+interface SanitizeRequest {
+  action: 'sanitize';
+  text: string;
+}
 
-  const switchTab = (tab: 'ocr' | 'sanitize') => {
-    setActiveTab(tab);
-    setSelectedFile(null);
-    setImageBase64(null);
-    setImagePreview(null);
-    setStatus({ message: '', type: '' });
-  };
+type ActionRequest = OCRRequest | SanitizeRequest;
 
-  const handleImageSelection = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      setImagePreview(result);
-      setImageBase64(result.split(',')[1]);
-      setStatus({ message: 'Image loaded. Ready to run Workers AI OCR.', type: 'info' });
-    };
-    reader.readAsDataURL(file);
-  };
+interface AIMessage {
+  role: 'system' | 'user';
+  content: string;
+}
 
-  const handleSheetSelection = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+// ============================================================================
+// Constants
+// ============================================================================
 
-    setSelectedFile(file);
-    setStatus({ message: `Loaded ${file.name}. Ready to normalize roster properties.`, type: 'info' });
-  };
+const MAX_REQUEST_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_IMAGE_BASE64_LENGTH = 5 * 1024 * 1024;
+const MAX_TEXT_INPUT_LENGTH = 100000;
 
-  const triggerLocalDownload = (data: any[]) => {
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Campaign List");
+const CAMPAIGN_CHANNEL = 'call' as const;
+const VISION_MODEL = '@cf/meta/llama-3.2-90b-vision-preview';
+const TEXT_MODEL = '@cf/meta/llama-3.1-70b-instruct';
 
-    const dateStr = new Date().toISOString().slice(0, 10);
+const CORS_CONFIG = {
+  origin: ['http://localhost:3000', 'http://localhost:8787'],
+  allowMethods: ['POST', 'GET'],
+  allowHeaders: ['Content-Type'],
+  credentials: false,
+  maxAge: 86400,
+};
 
-    if (outputFormat === 'xlsx') {
-      XLSX.writeFile(workbook, `Cleaned_Campaign_${dateStr}.xlsx`);
-    } else {
-      XLSX.writeFile(workbook, `Cleaned_Campaign_${dateStr}.csv`, { bookType: 'csv' });
+// ============================================================================
+// Hono App Setup
+// ============================================================================
+
+type HonoContext = Context<{ Bindings: Bindings }>;
+const app = new Hono<{ Bindings: Bindings }>();
+
+app.use('/api/*', cors(CORS_CONFIG));
+
+// ============================================================================
+// Middleware
+// ============================================================================
+
+app.use(async (c, next) => {
+  const contentLength = c.req.header('content-length');
+  if (contentLength && parseInt(contentLength, 10) > MAX_REQUEST_SIZE_BYTES) {
+    return c.json(
+      { success: false, error: 'Request body exceeds maximum size' },
+      413
+    );
+  }
+  await next();
+});
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+/**
+ * Extract Base64 data from data URI or return raw Base64 string
+ */
+function extractBase64(input: string): string {
+  if (input.startsWith('data:')) {
+    const matches = input.match(/;base64,(.+)/);
+    if (matches?.[1]) {
+      return matches[1];
     }
-  };
+  }
+  return input;
+}
 
-  const executeProcessorPipeline = async () => {
-    setIsProcessing(true);
-    setStatus({ message: 'Hono Backend is communicating with Workers AI...', type: 'info' });
+/**
+ * Convert Base64 string to Uint8Array for Workers AI vision tasks
+ */
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
 
+/**
+ * Extract and parse JSON from AI response, handling markdown and formatting quirks
+ */
+function extractJSON(aiText: string): unknown {
+  if (!aiText || typeof aiText !== 'string') {
+    throw new Error('Invalid AI response: not a string');
+  }
+
+  const trimmed = aiText.trim();
+
+  // Try markdown code block extraction
+  const jsonBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (jsonBlockMatch?.[1]) {
+    const jsonString = jsonBlockMatch[1].trim();
     try {
-      let parsedResultJson: any[] = [];
-
-      if (activeTab === 'ocr') {
-        if (!imageBase64) throw new Error("No image selected");
-
-        const response = await fetch(LOCAL_API_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'ocr',
-            channel,
-            image: imageBase64
-          })
-        });
-
-        if (!response.ok) throw new Error('Worker OCR pipeline failed.');
-        const result = await response.json();
-        parsedResultJson = result.data;
-
-      } else {
-        if (!selectedFile) throw new Error("No file selected");
-
-        // Convert file data to raw text/json to send to our Hono processor
-        const buffer = await selectedFile.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: 'array' });
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rawRows = XLSX.utils.sheet_to_json(worksheet);
-
-        const response = await fetch(LOCAL_API_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'sanitize',
-            channel,
-            text: JSON.stringify(rawRows)
-          })
-        });
-
-        if (!response.ok) throw new Error('Hono normalization pipeline failed.');
-        const result = await response.json();
-        parsedResultJson = result.data;
-      }
-
-      if (!parsedResultJson || parsedResultJson.length === 0) {
-        throw new Error('AI engine returned no structured records. Try another file.');
-      }
-
-      triggerLocalDownload(parsedResultJson);
-      setStatus({ message: `Success! Worker processed ${parsedResultJson.length} records.`, type: 'success' });
-
-    } catch (error: any) {
-      console.error(error);
-      setStatus({ message: `Operation Failed: ${error.message}`, type: 'error' });
-    } finally {
-      setIsProcessing(false);
+      return JSON.parse(jsonString);
+    } catch {
+      // Fall through to next strategy
     }
-  };
+  }
 
-  const isSubmitDisabled = isProcessing || (activeTab === 'ocr' && !imageBase64) || (activeTab === 'sanitize' && !selectedFile);
+  // Try direct JSON parse
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // Fall through to next strategy
+  }
 
-  return (
-    <div className="campaign-body">
-      <div className="container">
-        <div onClick={onBack} className="back-link" style={{ cursor: 'pointer', display: 'inline-flex' }}>
-          <ArrowLeft size={18} /> Return to Local Call Center
-        </div>
+  // Try to find JSON array
+  const arrayMatch = trimmed.match(/^\s*(\[[\s\S]*\])\s*$/);
+  if (arrayMatch?.[1]) {
+    try {
+      return JSON.parse(arrayMatch[1]);
+    } catch {
+      // Fall through to next strategy
+    }
+  }
 
-        <div className="header">
-          <h1>Campaign Data Companion</h1>
-          <p>Convert handwriting photos or format problematic rosters using Workers AI bound natively inside Hono</p>
-        </div>
+  // Try to find JSON object
+  const objectMatch = trimmed.match(/^\s*(\{[\s\S]*\})\s*$/);
+  if (objectMatch?.[1]) {
+    try {
+      return JSON.parse(objectMatch[1]);
+    } catch {
+      // Fall through
+    }
+  }
 
-        {/* Channel Selector */}
-        <div className="channel-select-group" style={{ marginBottom: '20px' }}>
-          <p style={{ fontWeight: 700, marginBottom: '8px', fontSize: '0.9rem' }}>Campaign Mode:</p>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            {['sms', 'email', 'call'].map((mode) => (
-              <button
-                key={mode}
-                className={`tab-btn ${channel === mode ? 'active' : ''}`}
-                onClick={() => setChannel(mode as any)}
-                style={{ padding: '8px 16px', textTransform: 'uppercase', fontSize: '0.8rem' }}
-              >
-                {mode} Mode
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="tabs">
-          <button 
-            className={`tab-btn ${activeTab === 'ocr' ? 'active' : ''}`} 
-            onClick={() => switchTab('ocr')}
-          >
-            <Camera size={18} /> Vision OCR (Llama 3.2)
-          </button>
-          <button 
-            className={`tab-btn ${activeTab === 'sanitize' ? 'active' : ''}`} 
-            onClick={() => switchTab('sanitize')}
-          >
-            <Sparkles size={18} /> Auto-Sanitize (Llama 3.1)
-          </button>
-        </div>
-
-        <div className="card">
-          {activeTab === 'ocr' && (
-            <div id="panel-ocr">
-              <h2>Handwritten List Extractor</h2>
-              <p className="description">Snap a sharp photo of pen-and-paper sign-up lists. Cloudflare's Edge Vision model will isolate text characters and normalize the fields.</p>
-
-              <div className="dropzone" onClick={() => ocrInputRef.current?.click()}>
-                <input type="file" ref={ocrInputRef} accept="image/*" onChange={handleImageSelection} />
-                <div className="dropzone-icon"><Camera size={24} /></div>
-                <p style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '4px' }}>Capture Photo or Select Image</p>
-                <p style={{ fontSize: '0.85rem', color: 'var(--neutral-600)' }}>Supports JPG, PNG processed securely via edge AI</p>
-              </div>
-
-              {imagePreview && (
-                <div className="preview-container" style={{ display: 'block' }}>
-                  <p style={{ fontSize: '0.8rem', marginBottom: '8px', fontWeight: 700, color: 'var(--neutral-700)' }}>Selected Roster Image Preview:</p>
-                  <img className="preview-image" src={imagePreview} alt="Upload preview" />
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'sanitize' && (
-            <div id="panel-sanitize">
-              <h2>Roster Normalization Helper</h2>
-              <p className="description">Upload problematic, broken, or weirdly formatted CSV/XLSX lists. Llama 3.1 will dynamically scan, structure, and output standard names and clean contacts.</p>
-
-              <div className="dropzone" onClick={() => sanitizeInputRef.current?.click()}>
-                <input type="file" ref={sanitizeInputRef} accept=".csv,.xlsx,.xls" onChange={handleSheetSelection} />
-                <div className="dropzone-icon"><FileSpreadsheet size={24} /></div>
-                <p style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '4px' }}>Select Dirty Spreadsheet</p>
-                <p style={{ fontSize: '0.85rem', color: 'var(--neutral-600)' }}>Supports CSV, XLSX up to 10MB</p>
-              </div>
-            </div>
-          )}
-
-          <div className="options-group">
-            <p className="options-title">Select Download Output File Format:</p>
-            <div className="format-selector">
-              <label className="format-label">
-                <input 
-                  type="radio" 
-                  name="output-format" 
-                  value="xlsx" 
-                  checked={outputFormat === 'xlsx'} 
-                  onChange={() => setOutputFormat('xlsx')} 
-                />
-                <FileSpreadsheet size={18} style={{ color: 'var(--success)' }} /> Microsoft Excel (.xlsx)
-              </label>
-              <label className="format-label">
-                <input 
-                  type="radio" 
-                  name="output-format" 
-                  value="csv" 
-                  checked={outputFormat === 'csv'} 
-                  onChange={() => setOutputFormat('csv')} 
-                />
-                <FileText size={18} style={{ color: 'var(--primary)' }} /> Plain CSV (.csv)
-              </label>
-            </div>
-          </div>
-
-          <button 
-            className="btn" 
-            disabled={isSubmitDisabled} 
-            onClick={executeProcessorPipeline}
-          >
-            <Play size={18} /> {isProcessing ? 'Processing in Worker...' : 'Extract & Download Clean File'}
-          </button>
-
-          {status.message && (
-            <div className={`status-message ${status.type}`} style={{ display: 'flex' }}>
-              {status.message}
-            </div>
-          )}
-        </div>
-
-        <div className="guide-box">
-          <h3><Info size={20} /> Quick Integration Guide</h3>
-          <div className="guide-steps">
-            <div className="step">
-              <div className="step-num">1</div>
-              <div className="step-text">
-                <h4>Hono & Edge Harmony</h4>
-                <p>This page sends the workload to the native <code>/api/companion</code> route. No extra domain setup required.</p>
-              </div>
-            </div>
-            <div className="step">
-              <div className="step-num">2</div>
-              <div className="step-text">
-                <h4>Download Clean Roster</h4>
-                <p>Choose standard .xlsx or .csv output formats. Tapping execute saves a clean copy locally to your machine.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  throw new Error('Could not extract valid JSON from AI response');
 }
+
+/**
+ * Call vision model for image analysis
+ */
+async function runVisionModel(
+  ai: Env['AI'],
+  systemPrompt: string,
+  imageArray: Uint8Array
+): Promise<string> {
+  try {
+    const messages: AIMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: 'Process this image.' }
+    ];
+
+    const response = await ai.run(VISION_MODEL, {
+      messages,
+      image: Array.from(imageArray),
+    });
+
+    const result = response.response || response.text || '';
+    if (!result) {
+      throw new Error('Empty response from vision model');
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Vision model error:', error instanceof Error ? error.message : String(error));
+    throw new Error('Vision model failed to process image');
+  }
+}
+
+/**
+ * Call text model for data processing and cleaning
+ */
+async function runTextModel(
+  ai: Env['AI'],
+  systemPrompt: string,
+  userMessage: string
+): Promise<string> {
+  try {
+    const messages: AIMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage }
+    ];
+
+    const response = await ai.run(TEXT_MODEL, {
+      messages
+    });
+
+    const result = response.response || response.text || '';
+    if (!result) {
+      throw new Error('Empty response from text model');
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Text model error:', error instanceof Error ? error.message : String(error));
+    throw new Error('Text model failed to process data');
+  }
+}
+
+// ============================================================================
+// Action Handlers
+// ============================================================================
+
+/**
+ * Handle OCR action: extract contacts from image
+ */
+async function handleOCRAction(
+  c: HonoContext,
+  request: OCRRequest
+): Promise<Response> {
+  // Validate image parameter
+  if (!request.image || typeof request.image !== 'string') {
+    return c.json(
+      { success: false, error: 'Missing or invalid image parameter' },
+      400
+    );
+  }
+
+  // Check image size
+  if (request.image.length > MAX_IMAGE_BASE64_LENGTH) {
+    return c.json(
+      { success: false, error: 'Image data exceeds maximum size' },
+      413
+    );
+  }
+
+  // Extract Base64 from data URI if needed
+  let base64Data: string;
+  try {
+    base64Data = extractBase64(request.image);
+    if (!base64Data) {
+      throw new Error('No Base64 data found');
+    }
+  } catch {
+    return c.json(
+      { success: false, error: 'Invalid Base64 image data' },
+      400
+    );
+  }
+
+  const systemPrompt = `You are an expert visual data extraction specialist.
+Your task: Analyze the provided image and extract all visible contacts from handwritten lists, rosters, or sign-up sheets.
+
+For each contact, extract:
+- Full name
+- Email address
+- Phone number
+
+Output format MUST be valid JSON only. No explanations, markdown, or other text.
+
+Schema:
+[
+  { "name": "John Doe", "email": "john@example.com", "phone": "+1234567890" },
+  { "name": "Jane Smith", "email": "jane@example.com", "phone": "+0987654321" }
+]
+
+If no contacts found, return: []`;
+
+  try {
+    const imageArray = base64ToUint8Array(base64Data);
+    const aiText = await runVisionModel(c.env.AI, systemPrompt, imageArray);
+
+    const data = extractJSON(aiText) as unknown;
+
+    if (!Array.isArray(data)) {
+      return c.json(
+        { success: false, error: 'Invalid response structure from model' },
+        500
+      );
+    }
+
+    // Validate extracted contacts
+    const validatedData: Contact[] = data.map((item: unknown) => {
+      const obj = item as Record<string, unknown>;
+      return {
+        name: String(obj.name || ''),
+        email: String(obj.email || ''),
+        phone: String(obj.phone || ''),
+      };
+    });
+
+    return c.json({ success: true, data: validatedData }, 200);
+  } catch (error) {
+    console.error('OCR processing failed:', error instanceof Error ? error.message : String(error));
+    return c.json(
+      { success: false, error: 'Failed to process image' },
+      500
+    );
+  }
+}
+
+/**
+ * Handle sanitize action: clean and validate contacts for call campaigns
+ */
+async function handleSanitizeAction(
+  c: HonoContext,
+  request: SanitizeRequest
+): Promise<Response> {
+  // Validate text parameter
+  if (!request.text || typeof request.text !== 'string') {
+    return c.json(
+      { success: false, error: 'Missing or invalid text parameter' },
+      400
+    );
+  }
+
+  // Check text size
+  if (request.text.length > MAX_TEXT_INPUT_LENGTH) {
+    return c.json(
+      { success: false, error: 'Text input exceeds maximum size' },
+      413
+    );
+  }
+
+  const systemPrompt = `You are an expert contact data cleaning and validation agent.
+Your task: Parse and standardize messy spreadsheet, CSV, or roster data for a call campaign.
+
+Normalization rules:
+1. Names: Standardize capitalization, remove special characters and junk
+2. Phone numbers: Extract digits only, validate format (at least 10 digits after country code)
+3. Email addresses: Validate basic email syntax (must contain @ and domain)
+4. Status: Mark as "valid" or "invalid" based on call campaign requirements
+   - For call campaigns, a valid phone number is REQUIRED
+5. Notes: Provide brief explanation (max 30 chars) if marked invalid, otherwise empty string
+
+Output format MUST be valid JSON only. No explanations, markdown, or other text.
+
+Schema:
+[
+  { "name": "John Doe", "email": "john@example.com", "phone": "+1234567890", "status": "valid", "notes": "" },
+  { "name": "Incomplete", "email": "", "phone": "", "status": "invalid", "notes": "Missing phone number" }
+]
+
+If no valid data, return: []`;
+
+  try {
+    const userMessage = `Clean and validate this contact list for call campaigns:\n\n${request.text}`;
+    const aiText = await runTextModel(c.env.AI, systemPrompt, userMessage);
+
+    const data = extractJSON(aiText) as unknown;
+
+    if (!Array.isArray(data)) {
+      return c.json(
+        { success: false, error: 'Invalid response structure from model' },
+        500
+      );
+    }
+
+    // Validate and type-cast sanitized contacts
+    const validatedData: SanitizedContact[] = data.map((item: unknown) => {
+      const obj = item as Record<string, unknown>;
+      const status = obj.status === 'valid' ? 'valid' : 'invalid';
+      return {
+        name: String(obj.name || ''),
+        email: String(obj.email || ''),
+        phone: String(obj.phone || ''),
+        status,
+        notes: String(obj.notes || ''),
+      };
+    });
+
+    return c.json({ success: true, data: validatedData }, 200);
+  } catch (error) {
+    console.error('Sanitization processing failed:', error instanceof Error ? error.message : String(error));
+    return c.json(
+      { success: false, error: 'Failed to process contact data' },
+      500
+    );
+  }
+}
+
+// ============================================================================
+// Route Handlers
+// ============================================================================
+
+/**
+ * Main unified API endpoint for Campaign Companion actions
+ */
+app.post('/api/companion', async (c) => {
+  try {
+    const request = await c.req.json<ActionRequest>();
+
+    // Validate action parameter
+    if (!request.action || typeof request.action !== 'string') {
+      return c.json(
+        { success: false, error: 'Missing or invalid action parameter' },
+        400
+      );
+    }
+
+    // Route to appropriate handler
+    switch (request.action) {
+      case 'ocr':
+        return await handleOCRAction(c, request as OCRRequest);
+
+      case 'sanitize':
+        return await handleSanitizeAction(c, request as SanitizeRequest);
+
+      default:
+        return c.json(
+          { success: false, error: `Unknown action: ${request.action}` },
+          400
+        );
+    }
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      console.error('JSON parse error:', error.message);
+      return c.json(
+        { success: false, error: 'Invalid JSON in request body' },
+        400
+      );
+    }
+
+    console.error('Request processing error:', error instanceof Error ? error.message : String(error));
+    return c.json(
+      { success: false, error: 'Internal server error' },
+      500
+    );
+  }
+});
+
+/**
+ * Health check endpoint
+ */
+app.get('/api/health', (c) => {
+  return c.json({ status: 'ok', timestamp: new Date().toISOString() }, 200);
+});
+
+/**
+ * 404 handler for undefined routes
+ */
+app.notFound((c) => {
+  return c.json(
+    { success: false, error: 'Endpoint not found' },
+    404
+  );
+});
+
+/**
+ * Error handler for unhandled exceptions
+ */
+app.onError((err, c) => {
+  console.error('Unhandled error:', err instanceof Error ? err.message : String(err));
+  return c.json(
+    { success: false, error: 'Internal server error' },
+    500
+  );
+});
+
+export default app;
