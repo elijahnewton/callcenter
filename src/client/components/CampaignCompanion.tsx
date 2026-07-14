@@ -7,16 +7,18 @@ interface CampaignCompanionProps {
   onBack: () => void;
 }
 
-const LOCAL_API_ENDPOINT = '../../companion-utility/index.ts';
+// Relative endpoint matching our Hono route!
+const LOCAL_API_ENDPOINT = '/api/companion';
 
 export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
   const [activeTab, setActiveTab] = useState<'ocr' | 'sanitize'>('ocr');
-  
+  const [channel, setChannel] = useState<'sms' | 'email' | 'call'>('sms');
+
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [outputFormat, setOutputFormat] = useState<'xlsx' | 'csv'>('xlsx');
-  
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [status, setStatus] = useState<{ message: string; type: 'info' | 'success' | 'error' | '' }>({ message: '', type: '' });
 
@@ -40,7 +42,7 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
       const result = event.target?.result as string;
       setImagePreview(result);
       setImageBase64(result.split(',')[1]);
-      setStatus({ message: 'Image parsed successfully. Ready to run AI OCR pipeline.', type: 'info' });
+      setStatus({ message: 'Image loaded. Ready to run Workers AI OCR.', type: 'info' });
     };
     reader.readAsDataURL(file);
   };
@@ -69,30 +71,32 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
 
   const executeProcessorPipeline = async () => {
     setIsProcessing(true);
-    setStatus({ message: 'Cloud AI is currently processing your data. This may take up to 20 seconds...', type: 'info' });
+    setStatus({ message: 'Hono Backend is communicating with Workers AI...', type: 'info' });
 
     try {
       let parsedResultJson: any[] = [];
 
       if (activeTab === 'ocr') {
         if (!imageBase64) throw new Error("No image selected");
-        
+
         const response = await fetch(LOCAL_API_ENDPOINT, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'ocr',
+            channel,
             image: imageBase64
           })
         });
 
-        if (!response.ok) throw new Error('Cloud OCR transaction failed.');
+        if (!response.ok) throw new Error('Worker OCR pipeline failed.');
         const result = await response.json();
         parsedResultJson = result.data;
 
       } else {
         if (!selectedFile) throw new Error("No file selected");
 
+        // Convert file data to raw text/json to send to our Hono processor
         const buffer = await selectedFile.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: 'array' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -103,25 +107,26 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'sanitize',
-            data: rawRows
+            channel,
+            text: JSON.stringify(rawRows)
           })
         });
 
-        if (!response.ok) throw new Error('Normalization request rejected by edge worker.');
+        if (!response.ok) throw new Error('Hono normalization pipeline failed.');
         const result = await response.json();
         parsedResultJson = result.data;
       }
 
       if (!parsedResultJson || parsedResultJson.length === 0) {
-        throw new Error('AI was unable to extract any structured records from the input.');
+        throw new Error('AI engine returned no structured records. Try another file.');
       }
 
       triggerLocalDownload(parsedResultJson);
-      setStatus({ message: `Success! Extracted ${parsedResultJson.length} normalized records.`, type: 'success' });
+      setStatus({ message: `Success! Worker processed ${parsedResultJson.length} records.`, type: 'success' });
 
     } catch (error: any) {
       console.error(error);
-      setStatus({ message: `Operation Failed: ${error.message}. Please try again.`, type: 'error' });
+      setStatus({ message: `Operation Failed: ${error.message}`, type: 'error' });
     } finally {
       setIsProcessing(false);
     }
@@ -138,7 +143,24 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
 
         <div className="header">
           <h1>Campaign Data Companion</h1>
-          <p>Convert handwriting photos or format problematic rosters using serverless Cloud AI</p>
+          <p>Convert handwriting photos or format problematic rosters using Workers AI bound natively inside Hono</p>
+        </div>
+
+        {/* Channel Selector */}
+        <div className="channel-select-group" style={{ marginBottom: '20px' }}>
+          <p style={{ fontWeight: 700, marginBottom: '8px', fontSize: '0.9rem' }}>Campaign Mode:</p>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            {['sms', 'email', 'call'].map((mode) => (
+              <button
+                key={mode}
+                className={`tab-btn ${channel === mode ? 'active' : ''}`}
+                onClick={() => setChannel(mode as any)}
+                style={{ padding: '8px 16px', textTransform: 'uppercase', fontSize: '0.8rem' }}
+              >
+                {mode} Mode
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="tabs">
@@ -146,13 +168,13 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
             className={`tab-btn ${activeTab === 'ocr' ? 'active' : ''}`} 
             onClick={() => switchTab('ocr')}
           >
-            <Camera size={18} /> Image OCR Engine
+            <Camera size={18} /> Vision OCR (Llama 3.2)
           </button>
           <button 
             className={`tab-btn ${activeTab === 'sanitize' ? 'active' : ''}`} 
             onClick={() => switchTab('sanitize')}
           >
-            <Sparkles size={18} /> Clean & Normalize Sheet
+            <Sparkles size={18} /> Auto-Sanitize (Llama 3.1)
           </button>
         </div>
 
@@ -160,18 +182,18 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
           {activeTab === 'ocr' && (
             <div id="panel-ocr">
               <h2>Handwritten List Extractor</h2>
-              <p className="description">Snap a sharp photo of pen-and-paper sign-up lists, cell group cards, or rosters. The Cloud AI reads names and phone numbers directly from the picture and compiles them.</p>
+              <p className="description">Snap a sharp photo of pen-and-paper sign-up lists. Cloudflare's Edge Vision model will isolate text characters and normalize the fields.</p>
 
               <div className="dropzone" onClick={() => ocrInputRef.current?.click()}>
                 <input type="file" ref={ocrInputRef} accept="image/*" onChange={handleImageSelection} />
                 <div className="dropzone-icon"><Camera size={24} /></div>
                 <p style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '4px' }}>Capture Photo or Select Image</p>
-                <p style={{ fontSize: '0.85rem', color: 'var(--neutral-600)' }}>Supports JPG, PNG formats up to 5MB</p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--neutral-600)' }}>Supports JPG, PNG processed securely via edge AI</p>
               </div>
 
               {imagePreview && (
                 <div className="preview-container" style={{ display: 'block' }}>
-                  <p style={{ fontSize: '0.8rem', marginBottom: '8px', fontWeight: 700, color: 'var(--neutral-700)' }}>Selected Roster Image:</p>
+                  <p style={{ fontSize: '0.8rem', marginBottom: '8px', fontWeight: 700, color: 'var(--neutral-700)' }}>Selected Roster Image Preview:</p>
                   <img className="preview-image" src={imagePreview} alt="Upload preview" />
                 </div>
               )}
@@ -181,7 +203,7 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
           {activeTab === 'sanitize' && (
             <div id="panel-sanitize">
               <h2>Roster Normalization Helper</h2>
-              <p className="description">Upload problematic, broken, or weirdly formatted CSV/XLSX lists. The AI identifies conjoined names, isolates contact telephone numbers, and formats properties cleanly.</p>
+              <p className="description">Upload problematic, broken, or weirdly formatted CSV/XLSX lists. Llama 3.1 will dynamically scan, structure, and output standard names and clean contacts.</p>
 
               <div className="dropzone" onClick={() => sanitizeInputRef.current?.click()}>
                 <input type="file" ref={sanitizeInputRef} accept=".csv,.xlsx,.xls" onChange={handleSheetSelection} />
@@ -223,7 +245,7 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
             disabled={isSubmitDisabled} 
             onClick={executeProcessorPipeline}
           >
-            <Play size={18} /> {isProcessing ? 'Processing...' : 'Analyze & Export Clean File'}
+            <Play size={18} /> {isProcessing ? 'Processing in Worker...' : 'Extract & Download Clean File'}
           </button>
 
           {status.message && (
@@ -239,22 +261,15 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
             <div className="step">
               <div className="step-num">1</div>
               <div className="step-text">
-                <h4>Convert Roster Offline</h4>
-                <p>Upload handwritten lists or messy formats. The AI processes inputs and automatically creates structural records matching 'Name' and 'Phone'.</p>
+                <h4>Hono & Edge Harmony</h4>
+                <p>This page sends the workload to the native <code>/api/companion</code> route. No extra domain setup required.</p>
               </div>
             </div>
             <div className="step">
               <div className="step-num">2</div>
               <div className="step-text">
-                <h4>Download Your Clean File</h4>
-                <p>Choose either standard .xlsx or .csv output formats. Tapping execute starts an automatic download process.</p>
-              </div>
-            </div>
-            <div className="step">
-              <div className="step-num">3</div>
-              <div className="step-text">
-                <h4>Import directly to Call Center workspace</h4>
-                <p>Return to the main local browser application screen, drop in the compiled export file, and start follow-up calls immediately.</p>
+                <h4>Download Clean Roster</h4>
+                <p>Choose standard .xlsx or .csv output formats. Tapping execute saves a clean copy locally to your machine.</p>
               </div>
             </div>
           </div>

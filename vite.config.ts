@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+// Suppress missing type declarations for vite-plugin-pwa in this workspace
+// @ts-ignore: module has no type declarations
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
