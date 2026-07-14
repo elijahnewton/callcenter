@@ -18,19 +18,21 @@ app.post('/api/companion', async (c) => {
     const payload = await c.req.json();
     const { action, channel, text, image } = payload;
 
-    // --- ACTION: IMAGE OCR (Llama 3.2 Vision) ---
+    // --- ACTION: IMAGE OCR (Moondream Vision) ---
     if (action === 'ocr' && image) {
       let base64Data = image;
       if (base64Data.startsWith('data:')) {
         base64Data = base64Data.split(',')[1];
       }
 
-      // Convert Base64 string directly into a binary byte array for Workers AI
+      // Convert Base64 string into a binary byte array for Workers AI
       const binaryString = atob(base64Data);
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
+      
+      // Ensure it maps safely to an explicit number array acceptable by Cloudflare's /image schema
       const imageArray = Array.from(bytes);
 
       const systemPrompt = `You are an expert visual data extraction agent. 
@@ -45,6 +47,7 @@ Output schema:
 
 Do not return any conversational text, introductions, markdown tags (except json block), or general comments. Only return JSON.`;
 
+      // Call Cloudflare Workers AI with the valid number array
       const aiResponse = await c.env.AI.run('@cf/moondream/moondream3.1-9B-A2B', {
         messages: [
           { role: 'system', content: systemPrompt },
@@ -53,7 +56,10 @@ Do not return any conversational text, introductions, markdown tags (except json
         image: imageArray,
       });
 
-      const parsedData = parseAIResponse(aiResponse.response || aiResponse.text);
+      // Moondream and other vision models sometimes return text inside .response, .text, or .description/.summary
+      const rawTextOutput = aiResponse.response || aiResponse.text || aiResponse.description || aiResponse.summary || '';
+      const parsedData = parseAIResponse(rawTextOutput);
+      
       return c.json({ success: true, data: parsedData });
     }
 
@@ -85,7 +91,8 @@ Only reply with raw JSON. Do not chat.`;
         ]
       });
 
-      const parsedData = parseAIResponse(aiResponse.response || aiResponse.text);
+      const rawTextOutput = aiResponse.response || aiResponse.text || '';
+      const parsedData = parseAIResponse(rawTextOutput);
       return c.json({ success: true, data: parsedData });
     }
 
