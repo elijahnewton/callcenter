@@ -82,7 +82,11 @@ export default {
         // Invoke Cloudflare Vision model
         const modelResponse = await env.AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
           prompt: 'Extract names and phones from image. Return raw JSON array of objects with structure: [{"name":"Name","phone":"CleanNumber"}]. No markdown.',
-          image: [...binaryBuffer]
+          image: [...binaryBuffer],
+          
+            headers: {
+              'X-Agree-License': 'true'
+            }
         });
 
         if (!modelResponse || !modelResponse.response) {
