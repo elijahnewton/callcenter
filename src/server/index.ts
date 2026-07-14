@@ -1,113 +1,503 @@
-import { Hono } from 'hono';
+
+import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
 
-type Bindings = {
-  AI: any; // bound to Cloudflare Workers AI
+// ============================================================================
+// Types & Interfaces
+// ============================================================================
+
+interface Bindings {
+  AI: Env['AI'];
+}
+
+interface Env {
+  AI: any;
+}
+
+interface Contact {
+  name: string;
+  email: string;
+  phone: string;
+}
+
+interface SanitizedContact extends Contact {
+  status: 'valid' | 'invalid';
+  notes: string;
+}
+
+interface OCRRequest {
+  action: 'ocr';
+  image: string;
+}
+
+interface SanitizeRequest {
+  action: 'sanitize';
+  text: string;
+  channel: 'sms' | 'call' | 'rvm' | 'email';
+}
+
+type ActionRequest = OCRRequest | SanitizeRequest;
+
+interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+interface AIMessage {
+  role: 'system' | 'user';
+  content: string;
+}
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const MAX_REQUEST_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_IMAGE_BASE64_LENGTH = 5 * 1024 * 1024;
+const MAX_TEXT_INPUT_LENGTH = 100000;
+
+const ALLOWED_CHANNELS = ['sms', 'call', 'rvm', 'email'] as const;
+const VISION_MODEL = '@cf/meta/llama-3.2-90b-vision-preview';
+const TEXT_MODEL = '@cf/meta/llama-3.1-70b-instruct';
+
+const CORS_CONFIG = {
+  origin: ['http://localhost:3000', 'http://localhost:8787'],
+  allowMethods: ['POST', 'GET'],
+  allowHeaders: ['Content-Type'],
+  credentials: false,
+  maxAge: 86400,
 };
 
+// ============================================================================
+// Hono App Setup
+// ============================================================================
+
+type HonoContext = Context<{ Bindings: Bindings }>;
 const app = new Hono<{ Bindings: Bindings }>();
 
-// Enable CORS for local development (production will be same-origin)
-app.use('/api/*', cors());
+app.use('/api/*', cors(CORS_CONFIG));
+
+// ============================================================================
+// Middleware
+// ============================================================================
+
+app.use(async (c, next) => {
+  const contentLength = c.req.header('content-length');
+  if (contentLength && parseInt(contentLength, 10) > MAX_REQUEST_SIZE_BYTES) {
+    return c.json(
+      { success: false, error: 'Request body exceeds maximum size' },
+      413
+    );
+  }
+  await next();
+});
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
 
 /**
- * Single, unified API endpoint for Campaign Companion actions
+ * Extract Base64 data from data URI or return raw Base64 string
+ */
+function extractBase64(input: string): string {
+  if (input.startsWith('data:')) {
+    const matches = input.match(/;base64,(.+)/);
+    if (matches?.[1]) {
+      return matches[1];
+    }
+  }
+  return input;
+}
+
+/**
+ * Convert Base64 string to Uint8Array for Workers AI vision tasks
+ */
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
+ * Extract and parse JSON from AI response, handling markdown and formatting quirks
+ */
+function extractJSON(aiText: string): unknown {
+  if (!aiText || typeof aiText !== 'string') {
+    throw new Error('Invalid AI response: not a string');
+  }
+
+  const trimmed = aiText.trim();
+
+  // Try markdown code block extraction
+  const jsonBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (jsonBlockMatch?.[1]) {
+    const jsonString = jsonBlockMatch[1].trim();
+    try {
+      return JSON.parse(jsonString);
+    } catch {
+      // Fall through to next strategy
+    }
+  }
+
+  // Try direct JSON parse
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // Fall through to next strategy
+  }
+
+  // Try to find JSON array
+  const arrayMatch = trimmed.match(/^\s*(\[[\s\S]*\])\s*$/);
+  if (arrayMatch?.[1]) {
+    try {
+      return JSON.parse(arrayMatch[1]);
+    } catch {
+      // Fall through to next strategy
+    }
+  }
+
+  // Try to find JSON object
+  const objectMatch = trimmed.match(/^\s*(\{[\s\S]*\})\s*$/);
+  if (objectMatch?.[1]) {
+    try {
+      return JSON.parse(objectMatch[1]);
+    } catch {
+      // Fall through
+    }
+  }
+
+  throw new Error('Could not extract valid JSON from AI response');
+}
+
+/**
+ * Call vision model for image analysis
+ */
+async function runVisionModel(
+  ai: Env['AI'],
+  systemPrompt: string,
+  imageArray: Uint8Array
+): Promise<string> {
+  try {
+    const messages: AIMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: 'Process this image.' }
+    ];
+
+    const response = await ai.run(VISION_MODEL, {
+      messages,
+      image: Array.from(imageArray),
+    });
+
+    const result = response.response || response.text || '';
+    if (!result) {
+      throw new Error('Empty response from vision model');
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Vision model error:', error instanceof Error ? error.message : String(error));
+    throw new Error('Vision model failed to process image');
+  }
+}
+
+/**
+ * Call text model for data processing and cleaning
+ */
+async function runTextModel(
+  ai: Env['AI'],
+  systemPrompt: string,
+  userMessage: string
+): Promise<string> {
+  try {
+    const messages: AIMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage }
+    ];
+
+    const response = await ai.run(TEXT_MODEL, {
+      messages
+    });
+
+    const result = response.response || response.text || '';
+    if (!result) {
+      throw new Error('Empty response from text model');
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Text model error:', error instanceof Error ? error.message : String(error));
+    throw new Error('Text model failed to process data');
+  }
+}
+
+// ============================================================================
+// Action Handlers
+// ============================================================================
+
+/**
+ * Handle OCR action: extract contacts from image
+ */
+async function handleOCRAction(
+  c: HonoContext,
+  request: OCRRequest
+): Promise<Response> {
+  // Validate image parameter
+  if (!request.image || typeof request.image !== 'string') {
+    return c.json(
+      { success: false, error: 'Missing or invalid image parameter' },
+      400
+    );
+  }
+
+  // Check image size
+  if (request.image.length > MAX_IMAGE_BASE64_LENGTH) {
+    return c.json(
+      { success: false, error: 'Image data exceeds maximum size' },
+      413
+    );
+  }
+
+  // Extract Base64 from data URI if needed
+  let base64Data: string;
+  try {
+    base64Data = extractBase64(request.image);
+    if (!base64Data) {
+      throw new Error('No Base64 data found');
+    }
+  } catch {
+    return c.json(
+      { success: false, error: 'Invalid Base64 image data' },
+      400
+    );
+  }
+
+  const systemPrompt = `You are an expert visual data extraction specialist.
+Your task: Analyze the provided image and extract all visible contacts from handwritten lists, rosters, or sign-up sheets.
+
+For each contact, extract:
+- Full name
+- Email address
+- Phone number
+
+Output format MUST be valid JSON only. No explanations, markdown, or other text.
+
+Schema:
+[
+  { "name": "John Doe", "email": "john@example.com", "phone": "+1234567890" },
+  { "name": "Jane Smith", "email": "jane@example.com", "phone": "+0987654321" }
+]
+
+If no contacts found, return: []`;
+
+  try {
+    const imageArray = base64ToUint8Array(base64Data);
+    const aiText = await runVisionModel(c.env.AI, systemPrompt, imageArray);
+
+    const data = extractJSON(aiText) as unknown;
+
+    if (!Array.isArray(data)) {
+      return c.json(
+        { success: false, error: 'Invalid response structure from model' },
+        500
+      );
+    }
+
+    // Validate extracted contacts
+    const validatedData: Contact[] = data.map((item: unknown) => {
+      const obj = item as Record<string, unknown>;
+      return {
+        name: String(obj.name || ''),
+        email: String(obj.email || ''),
+        phone: String(obj.phone || ''),
+      };
+    });
+
+    return c.json({ success: true, data: validatedData }, 200);
+  } catch (error) {
+    console.error('OCR processing failed:', error instanceof Error ? error.message : String(error));
+    return c.json(
+      { success: false, error: 'Failed to process image' },
+      500
+    );
+  }
+}
+
+/**
+ * Handle sanitize action: clean and validate contacts for campaign
+ */
+async function handleSanitizeAction(
+  c: HonoContext,
+  request: SanitizeRequest
+): Promise<Response> {
+  // Validate text parameter
+  if (!request.text || typeof request.text !== 'string') {
+    return c.json(
+      { success: false, error: 'Missing or invalid text parameter' },
+      400
+    );
+  }
+
+  // Validate channel parameter
+  if (!ALLOWED_CHANNELS.includes(request.channel)) {
+    return c.json(
+      { success: false, error: `Invalid channel. Must be one of: ${ALLOWED_CHANNELS.join(', ')}` },
+      400
+    );
+  }
+
+  // Check text size
+  if (request.text.length > MAX_TEXT_INPUT_LENGTH) {
+    return c.json(
+      { success: false, error: 'Text input exceeds maximum size' },
+      413
+    );
+  }
+
+  const channelRequirements: Record<string, string> = {
+    sms: 'A valid phone number is REQUIRED.',
+    call: 'A valid phone number is REQUIRED.',
+    rvm: 'A valid phone number is REQUIRED.',
+    email: 'A valid email address is REQUIRED.'
+  };
+
+  const systemPrompt = `You are an expert contact data cleaning and validation agent.
+Your task: Parse and standardize messy spreadsheet, CSV, or roster data for a "${request.channel}" campaign.
+
+Normalization rules:
+1. Names: Standardize capitalization, remove special characters and junk
+2. Phone numbers: Extract digits only, validate format (at least 10 digits after country code)
+3. Email addresses: Validate basic email syntax (must contain @ and domain)
+4. Status: Mark as "valid" or "invalid" based on campaign channel requirements
+   - Campaign channel: "${request.channel}"
+   - Requirement: ${channelRequirements[request.channel] || 'Unknown'}
+5. Notes: Provide brief explanation (max 30 chars) if marked invalid, otherwise empty string
+
+Output format MUST be valid JSON only. No explanations, markdown, or other text.
+
+Schema:
+[
+  { "name": "John Doe", "email": "john@example.com", "phone": "+1234567890", "status": "valid", "notes": "" },
+  { "name": "Incomplete", "email": "", "phone": "", "status": "invalid", "notes": "Missing contact info" }
+]
+
+If no valid data, return: []`;
+
+  try {
+    const userMessage = `Clean and validate this contact list for ${request.channel} campaigns:\n\n${request.text}`;
+    const aiText = await runTextModel(c.env.AI, systemPrompt, userMessage);
+
+    const data = extractJSON(aiText) as unknown;
+
+    if (!Array.isArray(data)) {
+      return c.json(
+        { success: false, error: 'Invalid response structure from model' },
+        500
+      );
+    }
+
+    // Validate and type-cast sanitized contacts
+    const validatedData: SanitizedContact[] = data.map((item: unknown) => {
+      const obj = item as Record<string, unknown>;
+      const status = obj.status === 'valid' ? 'valid' : 'invalid';
+      return {
+        name: String(obj.name || ''),
+        email: String(obj.email || ''),
+        phone: String(obj.phone || ''),
+        status,
+        notes: String(obj.notes || ''),
+      };
+    });
+
+    return c.json({ success: true, data: validatedData }, 200);
+  } catch (error) {
+    console.error('Sanitization processing failed:', error instanceof Error ? error.message : String(error));
+    return c.json(
+      { success: false, error: 'Failed to process contact data' },
+      500
+    );
+  }
+}
+
+// ============================================================================
+// Route Handlers
+// ============================================================================
+
+/**
+ * Main unified API endpoint for Campaign Companion actions
  */
 app.post('/api/companion', async (c) => {
   try {
-    const payload = await c.req.json();
-    const { action, channel, text, image } = payload;
+    const request = await c.req.json<ActionRequest>();
 
-    // --- ACTION: IMAGE OCR (Llama 3.2 Vision) ---
-    if (action === 'ocr' && image) {
-      let base64Data = image;
-      if (base64Data.startsWith('data:')) {
-        base64Data = base64Data.split(',')[1];
-      }
-
-      // Convert Base64 string directly into a binary byte array for Workers AI
-      const binaryString = atob(base64Data);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      const imageArray = Array.from(bytes);
-
-      const systemPrompt = `You are an expert visual data extraction agent. 
-Analyze the image containing handwritten contact lists or sign-up rosters.
-Extract all contacts containing Name, Email, and Phone Number.
-Format your response strictly as a JSON array of objects.
-
-Output schema:
-[
-  { "name": "Contact Name", "email": "contact@domain.com", "phone": "+1234567890" }
-]
-
-Do not return any conversational text, introductions, markdown tags (except json block), or general comments. Only return JSON.`;
-
-      const aiResponse = await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: 'Extract all records from this image.' }
-        ],
-        image: imageArray,
-      });
-
-      const parsedData = parseAIResponse(aiResponse.response || aiResponse.text);
-      return c.json({ success: true, data: parsedData });
+    // Validate action parameter
+    if (!request.action || typeof request.action !== 'string') {
+      return c.json(
+        { success: false, error: 'Missing or invalid action parameter' },
+        400
+      );
     }
 
-    // --- ACTION: EXCEL/CSV ROSTER SANITIZATION (Llama 3.1) ---
-    if (action === 'sanitize' && text) {
-      const systemPrompt = `You are an expert contact cleaning and normalization agent. 
-Your goal is to parse messy raw spreadsheet rows and standardize them for a "${channel}" campaign.
+    // Route to appropriate handler
+    switch (request.action) {
+      case 'ocr':
+        return await handleOCRAction(c, request as OCRRequest);
 
-Rules:
-1. Names: Standardize casing and strip junk symbols.
-2. Phone Numbers: Strip symbols and normalize to digits.
-3. Email: Validate email syntax.
-4. Validation Status: Mark each contact as "valid" or "invalid" based on this campaign channel ("${channel}").
-   - If channel is 'sms', 'call', or 'rvm' (Ringless Voicemail): A valid phone number is REQUIRED.
-   - If channel is 'email': A valid email is REQUIRED.
-5. Provide a short "notes" explanation if flagged "invalid".
+      case 'sanitize':
+        return await handleSanitizeAction(c, request as SanitizeRequest);
 
-Output schema:
-[
-  { "name": "Name", "email": "email@example.com", "phone": "+1234567890", "status": "valid" | "invalid", "notes": "Reason here or blank" }
-]
-
-Only reply with raw JSON. Do not chat.`;
-
-      const aiResponse = await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Clean up this list:\n\n${text}` }
-        ]
-      });
-
-      const parsedData = parseAIResponse(aiResponse.response || aiResponse.text);
-      return c.json({ success: true, data: parsedData });
+      default:
+        return c.json(
+          { success: false, error: `Unknown action: ${request.action}` },
+          400
+        );
+    }
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      console.error('JSON parse error:', error.message);
+      return c.json(
+        { success: false, error: 'Invalid JSON in request body' },
+        400
+      );
     }
 
-    return c.json({ error: 'Invalid or missing action parameters.' }, 400);
-
-  } catch (err: any) {
-    console.error(err);
-    return c.json({ error: 'Internal Worker error', details: err.message }, 500);
+    console.error('Request processing error:', error instanceof Error ? error.message : String(error));
+    return c.json(
+      { success: false, error: 'Internal server error' },
+      500
+    );
   }
 });
 
-// Robust parser to extract clean JSON blocks from AI markdown responses
-function parseAIResponse(aiText: string): any[] {
-  if (!aiText) return [];
-  try {
-    const jsonMatch = aiText.match(/```json\s*([\s\S]*?)\s*```/);
-    const cleanedString = jsonMatch ? jsonMatch[1] : aiText;
-    return JSON.parse(cleanedString.trim());
-  } catch (err) {
-    console.error('Failed to parse AI output as JSON:', aiText);
-    return [];
-  }
-}
+/**
+ * Health check endpoint
+ */
+app.get('/api/health', (c) => {
+  return c.json({ status: 'ok', timestamp: new Date().toISOString() }, 200);
+});
+
+/**
+ * 404 handler for undefined routes
+ */
+app.notFound((c) => {
+  return c.json(
+    { success: false, error: 'Endpoint not found' },
+    404
+  );
+});
+
+/**
+ * Error handler for unhandled exceptions
+ */
+app.onError((err, c) => {
+  console.error('Unhandled error:', err instanceof Error ? err.message : String(err));
+  return c.json(
+    { success: false, error: 'Internal server error' },
+    500
+  );
+});
 
 export default app;
