@@ -45,7 +45,7 @@ Output schema:
 
 Do not return any conversational text, introductions, markdown tags (except json block), or general comments. Only return JSON.`;
 
-      const aiResponse = await c.env.AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
+      const aiResponse = await c.env.AI.run('@cf/moondream/moondream3.1-9B-A2B', {
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: 'Extract all records from this image.' }
@@ -78,7 +78,7 @@ Output schema:
 
 Only reply with raw JSON. Do not chat.`;
 
-      const aiResponse = await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      const aiResponse = await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Clean up this list:\n\n${text}` }
