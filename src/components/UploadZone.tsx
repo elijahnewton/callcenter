@@ -6,6 +6,7 @@ import type { CampaignRecord, CallStatus } from '../types';
 interface UploadZoneProps {
   onRecordsParsed: (records: CampaignRecord[]) => Promise<void>;
   onAlert: (message: string, type?: 'success' | 'error' | 'info') => void;
+  onNavigate: () => void;
 }
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -18,10 +19,13 @@ function fuzzyMatch(value: string, patterns: string[]) {
 
 function normalizePhone(phone: unknown) {
   if (phone === null || phone === undefined) return '';
-  return String(phone).replace(/[^+\d]/g, '');
+  const cleaned = String(phone).replace(/[^0-9+]/g, '');
+  return cleaned.startsWith('+') 
+    ? '+' + cleaned.replace(/\+/g, '') 
+    : cleaned.replace(/\+/g, '');
 }
 
-export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
+export function UploadZone({ onRecordsParsed, onAlert, onNavigate }: UploadZoneProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const parseFile = async (file: File) => {
@@ -130,7 +134,7 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
           padding: '2.5rem 1.5rem',
           textAlign: 'center',
           backgroundColor: 'var(--neutral-100)',
-          cursor: 'pointer', // Fixed syntax error here
+          cursor: 'pointer',
           transition: 'all 0.2s ease',
           marginBottom: '2rem'
         }}
@@ -187,22 +191,27 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
             </p>
           </div>
         </div>
-        <a href="/utility_companion.html" style={{
-          background: 'var(--primary)',
-          color: '#ffffff',
-          padding: '0.6rem 1.2rem',
-          borderRadius: '8px',
-          textDecoration: 'none',
-          fontSize: '0.875rem',
-          fontWeight: 600,
-          whiteSpace: 'nowrap',
-          boxShadow: '0 2px 4px rgba(79, 70, 229, 0.1)',
-          display: 'inline-flex',
-          alignItems: 'center',
-          transition: 'all 0.2s ease'
-        }}>
+        <button 
+          type="button"
+          onClick={onNavigate}
+          style={{
+            background: 'var(--primary)',
+            color: '#ffffff',
+            padding: '0.6rem 1.2rem',
+            borderRadius: '8px',
+            border: 'none',
+            fontSize: '0.875rem',
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+            boxShadow: '0 2px 4px rgba(79, 70, 229, 0.1)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+        >
           Open AI Companion →
-        </a>
+        </button>
       </div>
 
       {/* Explanatory Guide Box */}
@@ -210,16 +219,16 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
         <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--neutral-800)', borderBottom: '1px solid var(--neutral-200)', paddingBottom: '0.5rem' }}>
           💡 How to Use This Application
         </h3>
-        
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          
+
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <div style={{ color: 'var(--primary)', marginTop: '2px' }}><CheckCircle2 size={18} /></div>
             <div>
               <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--neutral-900)' }}>1. Prepare Your Spreadsheet</h4>
               <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem' }}>
                 Your Excel or CSV file just needs two basic columns. The system automatically scans for column headers like <em>Name, Full Name, Phone, Contact, or Mobile</em>.
-                <b>NOTE:</b> The Document should  <b>NOT</b> have a heading line eg. List of members.
+                <b>NOTE:</b> The Document should <b>NOT</b> have a heading line eg. List of members.
               </p>
             </div>
           </div>
