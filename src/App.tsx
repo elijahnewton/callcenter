@@ -8,11 +8,13 @@ import { SetupScreen } from './components/SetupScreen';
 import { UploadZone } from './components/UploadZone';
 import { Teleprompter } from './components/Teleprompter';
 import { TrackingPanel } from './components/TrackingPanel';
+import CampaignCompanion from './components/CampaignCompanion'; // 👈 1. Import your new companion component
 
 const DEFAULT_SCRIPT =
   'Hello [Name], my name is [CallerName] calling from "[BranchName]". I am calling to know how you\'re doing and to invite you for service.';
 
 type AlertType = 'success' | 'error' | 'info';
+type ViewType = 'main' | 'companion'; // 👈 2. Define our view types
 
 declare global {
   interface WindowEventMap {
@@ -42,6 +44,9 @@ export default function App() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [alert, setAlert] = useState<{ message: string; type: AlertType } | null>(null);
+  
+  // 3. Track whether we are on the main dashboard or the AI companion view
+  const [view, setView] = useState<ViewType>('main'); 
 
   const hydratedRef = useRef(false);
 
@@ -210,6 +215,11 @@ export default function App() {
     );
   }
 
+  // 4. Intercept rendering if the user switched to the AI Companion screen
+  if (view === 'companion') {
+    return <CampaignCompanion onBack={() => setView('main')} />;
+  }
+
   return (
     <div>
       <header className="header">
@@ -243,7 +253,12 @@ export default function App() {
         </div>
 
         {activeRecords.length === 0 ? (
-          <UploadZone onRecordsParsed={handleRecordsParsed} onAlert={showAlert} />
+          /* 5. Pass the navigate function down to the UploadZone component */
+          <UploadZone 
+            onRecordsParsed={handleRecordsParsed} 
+            onAlert={showAlert} 
+            onNavigate={() => setView('companion')} 
+          />
         ) : (
           <>
             <div className="progress-container">
