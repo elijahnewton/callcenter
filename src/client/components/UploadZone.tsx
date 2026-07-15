@@ -253,12 +253,17 @@ export function UploadZone({ onRecordsParsed, onAlert, onNavigate }: UploadZoneP
             </div>
           </div>
 
+          {/* --- UPDATED PRIVACY NOTICE --- */}
           <div style={{ display: 'flex', gap: '0.75rem', background: '#f8fafc', padding: '0.75rem', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
             <div style={{ color: '#6366f1', marginTop: '2px' }}><ShieldAlert size={18} /></div>
             <div>
-              <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--neutral-800)' }}>🔒 Private & 100% Offline</h4>
+              <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--neutral-800)' }}>🔒 Privacy & Offline Design</h4>
               <p style={{ fontSize: '0.8rem', color: 'var(--neutral-600)', marginTop: '0.15rem', lineHeight: '1.4' }}>
-                Once this webpage is initially loaded, it operates completely offline. Your contact sheets and logged details are processed locally in your browser memory and are <strong>never</strong> transmitted over the internet or sent to an external server.
+                <strong>The calling workspace runs entirely offline.</strong> Your contact sheets and call logs are processed locally in your browser and are <strong>never</strong> sent over the internet for the core calling feature. 
+                <br />
+                <em style={{ display: 'block', marginTop: '0.35rem' }}>
+                  Note: The optional <strong>AI Companion</strong> (for OCR or spreadsheet sanitization) uses secure cloud AI processing. No data is stored or shared with third parties.
+                </em>
               </p>
             </div>
           </div>
