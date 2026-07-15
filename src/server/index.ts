@@ -60,7 +60,7 @@ const MAX_TEXT_INPUT_LENGTH = 100000;
 
 const ALLOWED_CHANNELS = ['sms', 'call', 'rvm', 'email'] as const;
 const VISION_MODEL = '@cf/meta/llama-3.2-90b-vision-preview';
-const TEXT_MODEL = '@cf/meta/llama-3.1-70b-instruct';
+const TEXT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
 // ============================================================================
 // Hono App Setup
@@ -135,8 +135,8 @@ function extractJSON(aiText: string): unknown {
   // Try markdown code block extraction
   const jsonBlockMatch = trimmed.match(/
 http://googleusercontent.com/immersive_entry_chip/0
-```(?
-  if (jsonBlockMatch?.[1]) {
+
+if (jsonBlockMatch?.[1]) {
     const jsonString = jsonBlockMatch[1].trim();
     try {
       return JSON.parse(jsonString);
