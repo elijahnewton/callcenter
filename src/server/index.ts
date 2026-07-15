@@ -27,14 +27,14 @@ interface SanitizedContact extends Contact {
 interface OCRRequest {
   action: 'ocr';
   image: string;
-  expectedRecordCount?: number; // Added to prevent silent data loss
+  expectedRecordCount?: number;
 }
 
 interface SanitizeRequest {
   action: 'sanitize';
   text: string;
   channel: 'sms' | 'call' | 'rvm' | 'email';
-  expectedRecordCount?: number; // Added to prevent silent data loss
+  expectedRecordCount?: number;
 }
 
 type ActionRequest = OCRRequest | SanitizeRequest;
@@ -69,9 +69,9 @@ const TEXT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 type HonoContext = Context<{ Bindings: Bindings }>;
 const app = new Hono<{ Bindings: Bindings }>();
 
-// Fixed CORS: Dynamically allow the requesting origin (handles localhost & production)
+// Fixed CORS: fallback to '*' when no Origin header (e.g. curl, server-to-server)
 app.use('/api/*', cors({
-  origin: (origin) => origin, 
+  origin: (origin) => origin || '*',
   allowMethods: ['POST', 'GET', 'OPTIONS'],
   allowHeaders: ['Content-Type'],
   credentials: true,
@@ -102,7 +102,7 @@ app.use(async (c, next) => {
  */
 function extractBase64(input: string): string {
   if (input.startsWith('data:')) {
-    const matches = input.match(/;base64,(.+)/);
+    const matches = input.match(/;base64,([A-Za-z0-9+/=]+)/);
     if (matches?.[1]) {
       return matches[1];
     }
@@ -132,11 +132,9 @@ function extractJSON(aiText: string): unknown {
 
   const trimmed = aiText.trim();
 
-  // Try markdown code block extraction
-  const jsonBlockMatch = trimmed.match(/
-http://googleusercontent.com/immersive_entry_chip/0
-
-if (jsonBlockMatch?.[1]) {
+  // Try markdown code block extraction – FIXED REGEX
+  const jsonBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (jsonBlockMatch?.[1]) {
     const jsonString = jsonBlockMatch[1].trim();
     try {
       return JSON.parse(jsonString);
@@ -176,7 +174,7 @@ if (jsonBlockMatch?.[1]) {
 }
 
 /**
- * Call vision model for image analysis
+ * Call vision model for image analysis – FIXED INPUT FORMAT
  */
 async function runVisionModel(
   ai: Env['AI'],
@@ -184,17 +182,14 @@ async function runVisionModel(
   imageArray: Uint8Array
 ): Promise<string> {
   try {
-    const messages: AIMessage[] = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: 'Process this image.' }
-    ];
-
+    // Llama 3.2 Vision expects { image: number[], prompt: string }
     const response = await ai.run(VISION_MODEL, {
-      messages,
       image: Array.from(imageArray),
+      prompt: systemPrompt,
     });
 
-    const result = response.response || response.text || '';
+    // FIXED: vision model returns .description
+    const result = response.description || '';
     if (!result) {
       throw new Error('Empty response from vision model');
     }
@@ -207,7 +202,7 @@ async function runVisionModel(
 }
 
 /**
- * Call text model for data processing and cleaning
+ * Call text model for data processing and cleaning – unchanged (text models use .response)
  */
 async function runTextModel(
   ai: Env['AI'],
@@ -304,10 +299,10 @@ If no contacts found, return: []`;
     if (request.expectedRecordCount !== undefined && validatedData.length !== request.expectedRecordCount) {
       console.warn(`[OCR] Data loss detected. Expected: ${request.expectedRecordCount}, Extracted: ${validatedData.length}`);
       return c.json(
-        { 
-          success: false, 
-          error: `Verification failed: Expected ${request.expectedRecordCount} records, but AI extracted ${validatedData.length}. Please retry.` 
-        }, 
+        {
+          success: false,
+          error: `Verification failed: Expected ${request.expectedRecordCount} records, but AI extracted ${validatedData.length}. Please retry.`
+        },
         422
       );
     }
@@ -389,8 +384,7 @@ If no valid data, return: []`;
       };
     });
 
-    // Guard against silent data loss: use explicitly passed expected count, 
-    // or attempt to auto-detect if the input text was formatted as a JSON array.
+    // Guard against silent data loss
     let expected = request.expectedRecordCount;
     if (expected === undefined) {
       try {
@@ -399,17 +393,17 @@ If no valid data, return: []`;
           expected = parsedInput.length;
         }
       } catch {
-        // Input is likely raw text/CSV, cannot safely auto-detect length without client passing it
+        // Input is raw text/CSV, cannot auto-detect length
       }
     }
 
     if (expected !== undefined && validatedData.length !== expected) {
       console.warn(`[Sanitize] Data loss detected. Expected: ${expected}, Returned: ${validatedData.length}`);
       return c.json(
-        { 
-          success: false, 
-          error: `Verification failed: Expected ${expected} records, but AI returned ${validatedData.length}. Please retry.` 
-        }, 
+        {
+          success: false,
+          error: `Verification failed: Expected ${expected} records, but AI returned ${validatedData.length}. Please retry.`
+        },
         422
       );
     }
@@ -478,5 +472,3 @@ app.onError((err, c) => {
 });
 
 export default app;
-
-
