@@ -59,7 +59,7 @@ const MAX_IMAGE_BASE64_LENGTH = 5 * 1024 * 1024;
 const MAX_TEXT_INPUT_LENGTH = 100000;
 
 const ALLOWED_CHANNELS = ['sms', 'call', 'rvm', 'email'] as const;
-const VISION_MODEL = '@cf/meta/llama-3.2-90b-vision-preview';
+const VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
 const TEXT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
 // ============================================================================
