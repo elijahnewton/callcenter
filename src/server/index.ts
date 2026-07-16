@@ -40,7 +40,7 @@ interface SanitizeRequest {
 type ActionRequest = OCRRequest | SanitizeRequest;
 
 // ============================================================================
-// Constants – switched to EU‑safe models
+// Constants
 // ============================================================================
 
 const MAX_REQUEST_SIZE_BYTES = 10 * 1024 * 1024;
@@ -49,9 +49,8 @@ const MAX_TEXT_INPUT_LENGTH = 100000;
 
 const ALLOWED_CHANNELS = ['sms', 'call', 'rvm', 'email'] as const;
 
-// New models – no geographic restrictions
-const VISION_MODEL = '@cf/microsoft/phi-3-vision-128k-instruct';
-const TEXT_MODEL = '@cf/mistral/mistral-7b-instruct-v0.2';   // or '@cf/google/gemma-2-9b-it'
+// Our one and only model – Gemma 4 handles text AND vision
+const MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 // ============================================================================
 // Hono App Setup
@@ -88,7 +87,7 @@ app.use(async (c, next) => {
 });
 
 // ============================================================================
-// Utility Functions (unchanged logging, no licence helper needed)
+// Utility Functions (with logging)
 // ============================================================================
 
 function extractJSON(aiText: string): unknown {
@@ -154,31 +153,35 @@ function extractJSON(aiText: string): unknown {
 }
 
 /**
- * Call Phi‑3‑Vision – expects messages + an images array with data URIs
+ * Run Gemma 4 in vision mode (OCR). Uses the image_url multimodal format.
  */
 async function runVisionModel(
   ai: Env['AI'],
   systemPrompt: string,
   imageDataUri: string
 ): Promise<string> {
-  console.log(`[VISION] Model: ${VISION_MODEL}`);
+  console.log(`[VISION] Model: ${MODEL}`);
   console.log(`[VISION] Prompt length: ${systemPrompt.length} chars`);
 
   const messages = [
     {
       role: 'user',
-      content: systemPrompt
+      content: [
+        { type: 'text', text: systemPrompt },
+        {
+          type: 'image_url',
+          image_url: { url: imageDataUri }   // base64 data URI required
+        }
+      ]
     }
   ];
 
   try {
-    console.log('[VISION] Sending request to Workers AI...');
-    const response = await ai.run(VISION_MODEL, {
-      messages,
-      images: [imageDataUri]       // Phi‑3‑Vision needs a separate 'images' array
-    });
+    console.log('[VISION] Sending request...');
+    const response = await ai.run(MODEL, { messages });
     console.log(`[VISION] Response keys: ${Object.keys(response).join(', ')}`);
 
+    // Gemma multimodal returns a text response, typically in the "response" field
     const result = response.response || '';
     if (!result) {
       console.error('[VISION] Empty response field');
@@ -191,22 +194,19 @@ async function runVisionModel(
     return result;
   } catch (error) {
     console.error('[VISION] Failed:', error instanceof Error ? error.message : String(error));
-    if (error instanceof Error && error.stack) {
-      console.error('[VISION] Stack:', error.stack);
-    }
     throw new Error('Vision model failed to process image');
   }
 }
 
 /**
- * Call Mistral 7B (or Gemma) – standard messages format
+ * Run Gemma 4 in text‑only mode (Sanitize). Uses standard system/user messages.
  */
 async function runTextModel(
   ai: Env['AI'],
   systemPrompt: string,
   userMessage: string
 ): Promise<string> {
-  console.log(`[TEXT] Model: ${TEXT_MODEL}`);
+  console.log(`[TEXT] Model: ${MODEL}`);
   console.log(`[TEXT] System prompt: ${systemPrompt.length} chars, user msg: ${userMessage.length} chars`);
 
   const messages = [
@@ -215,8 +215,8 @@ async function runTextModel(
   ];
 
   try {
-    console.log('[TEXT] Sending request to Workers AI...');
-    const response = await ai.run(TEXT_MODEL, { messages });
+    console.log('[TEXT] Sending request...');
+    const response = await ai.run(MODEL, { messages });
     console.log(`[TEXT] Response keys: ${Object.keys(response).join(', ')}`);
 
     const result = response.response || response.text || '';
@@ -231,15 +231,12 @@ async function runTextModel(
     return result;
   } catch (error) {
     console.error('[TEXT] Failed:', error instanceof Error ? error.message : String(error));
-    if (error instanceof Error && error.stack) {
-      console.error('[TEXT] Stack:', error.stack);
-    }
     throw new Error('Text model failed to process data');
   }
 }
 
 // ============================================================================
-// Action Handlers (identical to before, just calling the new models)
+// Action Handlers
 // ============================================================================
 
 async function handleOCRAction(c: HonoContext, request: OCRRequest): Promise<Response> {
@@ -248,18 +245,14 @@ async function handleOCRAction(c: HonoContext, request: OCRRequest): Promise<Res
   if (!request.image || typeof request.image !== 'string') {
     return c.json({ success: false, error: 'Missing or invalid image parameter' }, 400);
   }
-
   if (!request.image.startsWith('data:image/')) {
     return c.json({ success: false, error: 'Image must be a valid data URI' }, 400);
   }
 
   const base64Part = request.image.split(',')[1] || '';
-  const estimatedBytes = base64Part.length * 0.75;
-  if (estimatedBytes > MAX_IMAGE_SIZE_BYTES) {
+  if (base64Part.length * 0.75 > MAX_IMAGE_SIZE_BYTES) {
     return c.json({ success: false, error: 'Image data exceeds maximum size' }, 413);
   }
-
-  console.log(`[OCR-ACTION] Estimated image size: ~${Math.round(estimatedBytes / 1024)} KB`);
 
   const systemPrompt = `You are an expert visual data extraction specialist.
 Your task: Analyze the provided image and extract all visible contacts from handwritten lists, rosters, or sign-up sheets.
@@ -297,9 +290,6 @@ If no contacts found, return: []`;
     return c.json({ success: true, data: contacts }, 200);
   } catch (error) {
     console.error('[OCR-ACTION] Processing error:', error instanceof Error ? error.message : String(error));
-    if (error instanceof Error && error.stack) {
-      console.error('[OCR-ACTION] Stack:', error.stack);
-    }
     return c.json({ success: false, error: 'Failed to process image' }, 500);
   }
 }
@@ -356,24 +346,18 @@ If no valid data, return: []`;
       return c.json({ success: false, error: 'Invalid response structure from model' }, 500);
     }
 
-    const validatedData: SanitizedContact[] = data.map((item: any) => {
-      const status = item.status === 'valid' ? 'valid' : 'invalid';
-      return {
-        name: String(item.name || ''),
-        email: String(item.email || ''),
-        phone: String(item.phone || ''),
-        status,
-        notes: String(item.notes || ''),
-      };
-    });
+    const validatedData: SanitizedContact[] = data.map((item: any) => ({
+      name: String(item.name || ''),
+      email: String(item.email || ''),
+      phone: String(item.phone || ''),
+      status: item.status === 'valid' ? 'valid' : 'invalid',
+      notes: String(item.notes || ''),
+    }));
 
     console.log(`[SANITIZE-ACTION] Success – returned ${validatedData.length} contacts`);
     return c.json({ success: true, data: validatedData }, 200);
   } catch (error) {
     console.error('[SANITIZE-ACTION] Processing error:', error instanceof Error ? error.message : String(error));
-    if (error instanceof Error && error.stack) {
-      console.error('[SANITIZE-ACTION] Stack:', error.stack);
-    }
     return c.json({ success: false, error: 'Failed to process contact data' }, 500);
   }
 }
@@ -411,20 +395,15 @@ app.post('/api/companion', async (c) => {
 });
 
 app.get('/api/health', (c) => {
-  console.log('[HEALTH] Health check called');
   return c.json({ status: 'ok', timestamp: new Date().toISOString() }, 200);
 });
 
 app.notFound((c) => {
-  console.warn(`[404] Not found: ${c.req.url}`);
   return c.json({ success: false, error: 'Endpoint not found' }, 404);
 });
 
 app.onError((err, c) => {
   console.error('[ONERROR] Unhandled error:', err instanceof Error ? err.message : String(err));
-  if (err instanceof Error && err.stack) {
-    console.error('[ONERROR] Stack:', err.stack);
-  }
   return c.json({ success: false, error: 'Internal server error' }, 500);
 });
 
