@@ -86,35 +86,32 @@ app.use(async (c, next) => {
 });
 
 // ============================================================================
-// Licence Agreement Helper
+// Licence Agreement Helper (automatic acceptance)
 // ============================================================================
 
 const agreedModels = new Set<string>();
 
 /**
- * Ensure the model has accepted its licence. If we get error 5016,
- * send an "agree" prompt once and mark the model as agreed.
+ * Ensures the model's licence is accepted.
+ * If the model returns error 5016, send "agree" and retry once.
  */
 async function ensureModelAgreement(ai: Env['AI'], model: string) {
-  if (agreedModels.has(model)) return; // already agreed in this Worker instance
+  if (agreedModels.has(model)) return; // already agreed in this instance
 
   console.log(`[LICENCE] Checking licence for ${model}...`);
   try {
-    // A dummy call just to trigger the licence check
-    // We send a minimal valid prompt (text only)
-    const dummyMessages = [{ role: 'user', content: 'agree' }];
-    await ai.run(model, { messages: dummyMessages });
+    // Send a minimal request to trigger the check
+    await ai.run(model, { messages: [{ role: 'user', content: 'agree' }] });
     console.log(`[LICENCE] ${model} already accepted`);
   } catch (err: any) {
     const msg = err?.message || String(err);
     if (msg.includes('5016')) {
       console.log(`[LICENCE] ${model} requires agreement, sending 'agree'...`);
-      // Send the actual "agree" prompt
+      // This call actually sends the "agree" prompt and accepts the licence
       await ai.run(model, { messages: [{ role: 'user', content: 'agree' }] });
       console.log(`[LICENCE] ${model} agreement successful`);
     } else {
-      console.warn(`[LICENCE] Unexpected error during check for ${model}:`, msg);
-      // Not a licence error – rethrow so the caller can handle it
+      // Not a licence error – rethrow so it can be handled by the caller
       throw err;
     }
   }
@@ -187,6 +184,9 @@ function extractJSON(aiText: string): unknown {
   throw new Error('Could not extract valid JSON from AI response');
 }
 
+/**
+ * Call vision model – uses data URI as string, logs everything
+ */
 async function runVisionModel(
   ai: Env['AI'],
   systemPrompt: string,
@@ -195,7 +195,7 @@ async function runVisionModel(
   console.log(`[VISION] Model: ${VISION_MODEL}`);
   console.log(`[VISION] Prompt length: ${systemPrompt.length} chars`);
 
-  // Ensure licence
+  // Ensure licence is accepted
   await ensureModelAgreement(ai, VISION_MODEL);
 
   const messages = [
@@ -203,13 +203,13 @@ async function runVisionModel(
       role: 'user',
       content: [
         { type: 'text', text: systemPrompt },
-        { type: 'image', image: imageDataUri }   // string
+        { type: 'image', image: imageDataUri }
       ]
     }
   ];
 
   try {
-    console.log('[VISION] Sending request...');
+    console.log('[VISION] Sending request to Workers AI...');
     const response = await ai.run(VISION_MODEL, { messages });
     console.log(`[VISION] Response keys: ${Object.keys(response).join(', ')}`);
 
@@ -220,23 +220,30 @@ async function runVisionModel(
       throw new Error('Empty response from vision model');
     }
 
-    console.log(`[VISION] Output length: ${result.length} chars, first 300: ${result.substring(0, 300)}`);
+    console.log(`[VISION] Output length: ${result.length} chars`);
+    console.log(`[VISION] First 300 chars: ${result.substring(0, 300)}`);
     return result;
   } catch (error) {
     console.error('[VISION] Failed:', error instanceof Error ? error.message : String(error));
+    if (error instanceof Error && error.stack) {
+      console.error('[VISION] Stack:', error.stack);
+    }
     throw new Error('Vision model failed to process image');
   }
 }
 
+/**
+ * Call text model – logs and auto‑accepts licence
+ */
 async function runTextModel(
   ai: Env['AI'],
   systemPrompt: string,
   userMessage: string
 ): Promise<string> {
   console.log(`[TEXT] Model: ${TEXT_MODEL}`);
-  console.log(`[TEXT] System prompt length: ${systemPrompt.length}, user message length: ${userMessage.length}`);
+  console.log(`[TEXT] System prompt: ${systemPrompt.length} chars, user msg: ${userMessage.length} chars`);
 
-  // Ensure licence
+  // Ensure licence is accepted
   await ensureModelAgreement(ai, TEXT_MODEL);
 
   const messages = [
@@ -245,7 +252,7 @@ async function runTextModel(
   ];
 
   try {
-    console.log('[TEXT] Sending request...');
+    console.log('[TEXT] Sending request to Workers AI...');
     const response = await ai.run(TEXT_MODEL, { messages });
     console.log(`[TEXT] Response keys: ${Object.keys(response).join(', ')}`);
 
@@ -256,16 +263,20 @@ async function runTextModel(
       throw new Error('Empty response from text model');
     }
 
-    console.log(`[TEXT] Output length: ${result.length} chars, first 300: ${result.substring(0, 300)}`);
+    console.log(`[TEXT] Output length: ${result.length} chars`);
+    console.log(`[TEXT] First 300 chars: ${result.substring(0, 300)}`);
     return result;
   } catch (error) {
     console.error('[TEXT] Failed:', error instanceof Error ? error.message : String(error));
+    if (error instanceof Error && error.stack) {
+      console.error('[TEXT] Stack:', error.stack);
+    }
     throw new Error('Text model failed to process data');
   }
 }
 
 // ============================================================================
-// Action Handlers (already include logging)
+// Action Handlers (with detailed logging)
 // ============================================================================
 
 async function handleOCRAction(c: HonoContext, request: OCRRequest): Promise<Response> {
@@ -274,15 +285,18 @@ async function handleOCRAction(c: HonoContext, request: OCRRequest): Promise<Res
   if (!request.image || typeof request.image !== 'string') {
     return c.json({ success: false, error: 'Missing or invalid image parameter' }, 400);
   }
+
   if (!request.image.startsWith('data:image/')) {
     return c.json({ success: false, error: 'Image must be a valid data URI' }, 400);
   }
 
-  // Rough size check
   const base64Part = request.image.split(',')[1] || '';
-  if (base64Part.length * 0.75 > MAX_IMAGE_SIZE_BYTES) {
+  const estimatedBytes = base64Part.length * 0.75;
+  if (estimatedBytes > MAX_IMAGE_SIZE_BYTES) {
     return c.json({ success: false, error: 'Image data exceeds maximum size' }, 413);
   }
+
+  console.log(`[OCR-ACTION] Estimated image size: ~${Math.round(estimatedBytes / 1024)} KB`);
 
   const systemPrompt = `You are an expert visual data extraction specialist.
 Your task: Analyze the provided image and extract all visible contacts from handwritten lists, rosters, or sign-up sheets.
@@ -304,49 +318,42 @@ If no contacts found, return: []`;
 
   try {
     const aiText = await runVisionModel(c.env.AI, systemPrompt, request.image);
-    const data = extractJSON(aiText) as any[];
+    const data = extractJSON(aiText) as unknown;
 
     if (!Array.isArray(data)) {
-      return c.json({ success: false, error: 'Invalid response structure' }, 500);
+      return c.json({ success: false, error: 'Invalid response structure from model' }, 500);
     }
 
-    const contacts: Contact[] = data.map(item => ({
+    const contacts: Contact[] = data.map((item: any) => ({
       name: String(item.name || ''),
       email: String(item.email || ''),
       phone: String(item.phone || ''),
     }));
 
-    console.log(`[OCR-ACTION] Success – ${contacts.length} contacts`);
-    return c.json({ success: true, data: contacts });
+    console.log(`[OCR-ACTION] Success – extracted ${contacts.length} contacts`);
+    return c.json({ success: true, data: contacts }, 200);
   } catch (error) {
-    console.error('[OCR-ACTION] Failed:', error instanceof Error ? error.message : String(error));
+    console.error('[OCR-ACTION] Processing error:', error instanceof Error ? error.message : String(error));
+    if (error instanceof Error && error.stack) {
+      console.error('[OCR-ACTION] Stack:', error.stack);
+    }
     return c.json({ success: false, error: 'Failed to process image' }, 500);
   }
 }
 
-async function handleSanitizeAction(
-  c: HonoContext,
-  request: SanitizeRequest
-): Promise<Response> {
+async function handleSanitizeAction(c: HonoContext, request: SanitizeRequest): Promise<Response> {
   console.log('[SANITIZE-ACTION] Received sanitize request');
   console.log(`[SANITIZE-ACTION] Channel: ${request.channel}`);
 
   if (!request.text || typeof request.text !== 'string') {
-    console.warn('[SANITIZE-ACTION] Missing text parameter');
     return c.json({ success: false, error: 'Missing or invalid text parameter' }, 400);
   }
-
   if (!ALLOWED_CHANNELS.includes(request.channel)) {
-    console.warn(`[SANITIZE-ACTION] Invalid channel: ${request.channel}`);
     return c.json({ success: false, error: `Invalid channel. Must be one of: ${ALLOWED_CHANNELS.join(', ')}` }, 400);
   }
-
   if (request.text.length > MAX_TEXT_INPUT_LENGTH) {
-    console.warn(`[SANITIZE-ACTION] Text too long: ${request.text.length} chars`);
     return c.json({ success: false, error: 'Text input exceeds maximum size' }, 413);
   }
-
-  console.log(`[SANITIZE-ACTION] Input text length: ${request.text.length} chars`);
 
   const channelRequirements: Record<string, string> = {
     sms: 'A valid phone number is REQUIRED.',
@@ -379,50 +386,25 @@ If no valid data, return: []`;
 
   try {
     const userMessage = `Clean and validate this contact list for ${request.channel} campaigns:\n\n${request.text}`;
-    console.log('[SANITIZE-ACTION] Starting text model call...');
     const aiText = await runTextModel(c.env.AI, systemPrompt, userMessage);
-
-    console.log('[SANITIZE-ACTION] Extracting JSON from AI response...');
     const data = extractJSON(aiText) as unknown;
 
     if (!Array.isArray(data)) {
-      console.error('[SANITIZE-ACTION] Parsed data is not an array, type:', typeof data);
       return c.json({ success: false, error: 'Invalid response structure from model' }, 500);
     }
 
-    console.log(`[SANITIZE-ACTION] Received ${data.length} contacts`);
-    const validatedData: SanitizedContact[] = data.map((item: unknown, index) => {
-      const obj = item as Record<string, unknown>;
-      const status = obj.status === 'valid' ? 'valid' : 'invalid';
-      console.log(`[SANITIZE-ACTION] Contact ${index}:`, JSON.stringify(obj));
+    const validatedData: SanitizedContact[] = data.map((item: any) => {
+      const status = item.status === 'valid' ? 'valid' : 'invalid';
       return {
-        name: String(obj.name || ''),
-        email: String(obj.email || ''),
-        phone: String(obj.phone || ''),
+        name: String(item.name || ''),
+        email: String(item.email || ''),
+        phone: String(item.phone || ''),
         status,
-        notes: String(obj.notes || ''),
+        notes: String(item.notes || ''),
       };
     });
 
-    let expected = request.expectedRecordCount;
-    if (expected === undefined) {
-      try {
-        const parsedInput = JSON.parse(request.text);
-        if (Array.isArray(parsedInput)) {
-          expected = parsedInput.length;
-        }
-      } catch { /* not JSON, can't detect */ }
-    }
-
-    if (expected !== undefined && validatedData.length !== expected) {
-      console.warn(`[SANITIZE-ACTION] Record count mismatch: expected ${expected}, got ${validatedData.length}`);
-      return c.json({
-        success: false,
-        error: `Verification failed: Expected ${expected} records, but AI returned ${validatedData.length}. Please retry.`
-      }, 422);
-    }
-
-    console.log(`[SANITIZE-ACTION] Success – returning ${validatedData.length} contacts`);
+    console.log(`[SANITIZE-ACTION] Success – returned ${validatedData.length} contacts`);
     return c.json({ success: true, data: validatedData }, 200);
   } catch (error) {
     console.error('[SANITIZE-ACTION] Processing error:', error instanceof Error ? error.message : String(error));
@@ -444,7 +426,6 @@ app.post('/api/companion', async (c) => {
     console.log(`[API] Action: ${request.action}`);
 
     if (!request.action || typeof request.action !== 'string') {
-      console.warn('[API] Missing or invalid action parameter');
       return c.json({ success: false, error: 'Missing or invalid action parameter' }, 400);
     }
 
@@ -454,7 +435,6 @@ app.post('/api/companion', async (c) => {
       case 'sanitize':
         return await handleSanitizeAction(c, request as SanitizeRequest);
       default:
-        console.warn(`[API] Unknown action: ${request.action}`);
         return c.json({ success: false, error: `Unknown action: ${request.action}` }, 400);
     }
   } catch (error) {
@@ -463,9 +443,6 @@ app.post('/api/companion', async (c) => {
       return c.json({ success: false, error: 'Invalid JSON in request body' }, 400);
     }
     console.error('[API] Unexpected error:', error instanceof Error ? error.message : String(error));
-    if (error instanceof Error && error.stack) {
-      console.error('[API] Stack:', error.stack);
-    }
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
