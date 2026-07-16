@@ -83,69 +83,53 @@ app.use(async (c, next) => {
 
   await next();
 
-  console.log(`[RESPONSE] ${c.res.status} (${Date.now() - start}ms)`);
+  console.log(`[RESPONSE] \( {c.res.status} ( \){Date.now() - start}ms)`);
 });
 
 // ============================================================================
-// Utility Functions (with logging)
+// Utility Functions
 // ============================================================================
 
 function extractJSON(aiText: string): unknown {
   console.log(`[JSON-EXTRACT] Raw text length: ${aiText.length}`);
-  console.log(`[JSON-EXTRACT] First 500 chars: ${aiText.substring(0, 500)}`);
+  console.log(`[JSON-EXTRACT] First 800 chars: ${aiText.substring(0, 800)}`);
 
   if (!aiText || typeof aiText !== 'string') {
     console.error('[JSON-EXTRACT] Input is not a string');
     throw new Error('Invalid AI response: not a string');
   }
 
-  const trimmed = aiText.trim();
+  let trimmed = aiText.trim();
 
-  // Try markdown code block
+  // Remove markdown code blocks
   const jsonBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (jsonBlockMatch?.[1]) {
-    const jsonString = jsonBlockMatch[1].trim();
-    console.log('[JSON-EXTRACT] Found code block, parsing...');
-    try {
-      const parsed = JSON.parse(jsonString);
-      console.log('[JSON-EXTRACT] Successfully parsed from code block');
-      return parsed;
-    } catch (e) {
-      console.warn('[JSON-EXTRACT] Code block parse failed:', e);
-    }
+    trimmed = jsonBlockMatch[1].trim();
   }
 
-  // Direct parse
+  // Try to extract largest JSON array (handles truncation)
+  const arrayMatch = trimmed.match(/\[\s*\{[\s\S]*?\}\s*(?:,\s*\{[\s\S]*?\}\s*)*\]?/);
+  if (arrayMatch) {
+    trimmed = arrayMatch[0];
+    // Ensure it ends with ]
+    if (!trimmed.endsWith(']')) trimmed += ']';
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    console.log('[JSON-EXTRACT] Successfully parsed JSON');
+    return parsed;
+  } catch (e) {
+    console.warn('[JSON-EXTRACT] Primary parse failed:', (e as Error).message);
+  }
+
+  // Fallback: direct parse of trimmed text
   try {
     const parsed = JSON.parse(trimmed);
     console.log('[JSON-EXTRACT] Direct parse succeeded');
     return parsed;
   } catch (e) {
-    console.warn('[JSON-EXTRACT] Direct parse failed:', e);
-  }
-
-  // Outer array
-  const arrayMatch = trimmed.match(/^\s*(\[[\s\S]*\])\s*$/);
-  if (arrayMatch?.[1]) {
-    try {
-      const parsed = JSON.parse(arrayMatch[1]);
-      console.log('[JSON-EXTRACT] Parsed outer array');
-      return parsed;
-    } catch (e) {
-      console.warn('[JSON-EXTRACT] Outer array parse failed:', e);
-    }
-  }
-
-  // Outer object
-  const objectMatch = trimmed.match(/^\s*(\{[\s\S]*\})\s*$/);
-  if (objectMatch?.[1]) {
-    try {
-      const parsed = JSON.parse(objectMatch[1]);
-      console.log('[JSON-EXTRACT] Parsed outer object');
-      return parsed;
-    } catch (e) {
-      console.warn('[JSON-EXTRACT] Outer object parse failed:', e);
-    }
+    console.warn('[JSON-EXTRACT] Direct parse failed:', (e as Error).message);
   }
 
   console.error('[JSON-EXTRACT] All strategies failed');
@@ -153,7 +137,38 @@ function extractJSON(aiText: string): unknown {
 }
 
 /**
- * Run Gemma 4 in vision mode (OCR). Uses the image_url multimodal format.
+ * Robust response extraction for Gemma 4 (handles OpenAI-compatible + native formats)
+ */
+function extractAIContent(response: any): string {
+  console.log(`[EXTRACT] Response keys: ${Object.keys(response).join(', ')}`);
+
+  // OpenAI chat completions format (most common for Gemma 4)
+  if (response.choices?.[0]?.message?.content) {
+    return response.choices[0].message.content;
+  }
+
+  // Native Workers AI format
+  if (response.response) {
+    return response.response;
+  }
+
+  // Direct string
+  if (typeof response === 'string') {
+    return response;
+  }
+
+  // Deep fallback
+  const str = JSON.stringify(response);
+  const contentMatch = str.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (contentMatch?.[1]) {
+    return contentMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n');
+  }
+
+  return '';
+}
+
+/**
+ * Run Gemma 4 in vision mode (OCR)
  */
 async function runVisionModel(
   ai: Env['AI'],
@@ -170,7 +185,7 @@ async function runVisionModel(
         { type: 'text', text: systemPrompt },
         {
           type: 'image_url',
-          image_url: { url: imageDataUri }   // base64 data URI required
+          image_url: { url: imageDataUri }
         }
       ]
     }
@@ -180,22 +195,19 @@ async function runVisionModel(
     console.log('[VISION] Sending request...');
     const response = await ai.run(MODEL, {
       messages,
-      // --- FIX 1: Add max_tokens to prevent truncation ---
-      max_tokens: 2048,
+      max_tokens: 4096,
+      temperature: 0.1,
     });
-    console.log(`[VISION] Response keys: ${Object.keys(response).join(', ')}`);
 
-    // --- FIX 2: Correct response extraction for OpenAI‑compatible format ---
-    const result = response.choices?.[0]?.message?.content || '';
+    const result = extractAIContent(response);
 
-    if (!result) {
-      console.error('[VISION] Empty response field');
-      console.error('[VISION] Full response:', JSON.stringify(response).substring(0, 500));
+    if (!result || result.trim().length < 20) {
+      console.error('[VISION] Empty response');
+      console.error('[VISION] Full response:', JSON.stringify(response).substring(0, 600));
       throw new Error('Empty response from vision model');
     }
 
     console.log(`[VISION] Output length: ${result.length} chars`);
-    console.log(`[VISION] First 300 chars: ${result.substring(0, 300)}`);
     return result;
   } catch (error) {
     console.error('[VISION] Failed:', error instanceof Error ? error.message : String(error));
@@ -204,7 +216,7 @@ async function runVisionModel(
 }
 
 /**
- * Run Gemma 4 in text‑only mode (Sanitize). Uses standard system/user messages.
+ * Run Gemma 4 in text-only mode (Sanitize)
  */
 async function runTextModel(
   ai: Env['AI'],
@@ -223,22 +235,20 @@ async function runTextModel(
     console.log('[TEXT] Sending request...');
     const response = await ai.run(MODEL, {
       messages,
-      // --- FIX 1: Add max_tokens to prevent truncation ---
-      max_tokens: 2048,
+      max_tokens: 4096,        // Increased for larger contact lists
+      temperature: 0.1,
     });
-    console.log(`[TEXT] Response keys: ${Object.keys(response).join(', ')}`);
 
-    // --- FIX 2: Correct response extraction for OpenAI‑compatible format ---
-    const result = response.choices?.[0]?.message?.content || '';
+    const result = extractAIContent(response);
 
-    if (!result) {
+    if (!result || result.trim().length < 20) {
       console.error('[TEXT] Empty response fields');
-      console.error('[TEXT] Full response:', JSON.stringify(response).substring(0, 500));
+      console.error('[TEXT] Full response:', JSON.stringify(response).substring(0, 800));
       throw new Error('Empty response from text model');
     }
 
     console.log(`[TEXT] Output length: ${result.length} chars`);
-    console.log(`[TEXT] First 300 chars: ${result.substring(0, 300)}`);
+    console.log(`[TEXT] First 500 chars: ${result.substring(0, 500)}`);
     return result;
   } catch (error) {
     console.error('[TEXT] Failed:', error instanceof Error ? error.message : String(error));
@@ -349,7 +359,7 @@ Schema:
 If no valid data, return: []`;
 
   try {
-    const userMessage = `Clean and validate this contact list for ${request.channel} campaigns:\n\n${request.text}`;
+    const userMessage = `Clean and validate this contact list for \( {request.channel} campaigns:\n\n \){request.text}`;
     const aiText = await runTextModel(c.env.AI, systemPrompt, userMessage);
     const data = extractJSON(aiText) as unknown;
 
