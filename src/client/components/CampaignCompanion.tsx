@@ -76,11 +76,11 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      const result = event.target?.result as string;
-      setImagePreview(result);
-      setImageBase64(result.split(',')[1]);
-      setStatus({ message: 'Image loaded. Ready to run Workers AI OCR.', type: 'info' });
-    };
+  const result = event.target?.result as string;
+  setImagePreview(result);
+  setImageBase64(result);  // <-- store full data URI, not just the base64 part
+  setStatus({ message: 'Image loaded. Ready to run Workers AI OCR.', type: 'info' });
+};
     reader.onerror = () => {
       setStatus({ message: 'Failed to read the image file.', type: 'error' });
     };
