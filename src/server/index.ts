@@ -40,7 +40,7 @@ interface SanitizeRequest {
 type ActionRequest = OCRRequest | SanitizeRequest;
 
 // ============================================================================
-// Constants
+// Constants – switched to EU‑safe models
 // ============================================================================
 
 const MAX_REQUEST_SIZE_BYTES = 10 * 1024 * 1024;
@@ -48,8 +48,10 @@ const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_TEXT_INPUT_LENGTH = 100000;
 
 const ALLOWED_CHANNELS = ['sms', 'call', 'rvm', 'email'] as const;
-const VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
-const TEXT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+
+// New models – no geographic restrictions
+const VISION_MODEL = '@cf/microsoft/phi-3-vision-128k-instruct';
+const TEXT_MODEL = '@cf/mistral/mistral-7b-instruct-v0.2';   // or '@cf/google/gemma-2-9b-it'
 
 // ============================================================================
 // Hono App Setup
@@ -86,40 +88,7 @@ app.use(async (c, next) => {
 });
 
 // ============================================================================
-// Licence Agreement Helper (automatic acceptance)
-// ============================================================================
-
-const agreedModels = new Set<string>();
-
-/**
- * Ensures the model's licence is accepted.
- * If the model returns error 5016, send "agree" and retry once.
- */
-async function ensureModelAgreement(ai: Env['AI'], model: string) {
-  if (agreedModels.has(model)) return; // already agreed in this instance
-
-  console.log(`[LICENCE] Checking licence for ${model}...`);
-  try {
-    // Send a minimal request to trigger the check
-    await ai.run(model, { messages: [{ role: 'user', content: 'agree' }] });
-    console.log(`[LICENCE] ${model} already accepted`);
-  } catch (err: any) {
-    const msg = err?.message || String(err);
-    if (msg.includes('5016')) {
-      console.log(`[LICENCE] ${model} requires agreement, sending 'agree'...`);
-      // This call actually sends the "agree" prompt and accepts the licence
-      await ai.run(model, { messages: [{ role: 'user', content: 'agree' }] });
-      console.log(`[LICENCE] ${model} agreement successful`);
-    } else {
-      // Not a licence error – rethrow so it can be handled by the caller
-      throw err;
-    }
-  }
-  agreedModels.add(model);
-}
-
-// ============================================================================
-// Utility Functions (with logging)
+// Utility Functions (unchanged logging, no licence helper needed)
 // ============================================================================
 
 function extractJSON(aiText: string): unknown {
@@ -185,7 +154,7 @@ function extractJSON(aiText: string): unknown {
 }
 
 /**
- * Call vision model – uses data URI as string, logs everything
+ * Call Phi‑3‑Vision – expects messages + an images array with data URIs
  */
 async function runVisionModel(
   ai: Env['AI'],
@@ -195,22 +164,19 @@ async function runVisionModel(
   console.log(`[VISION] Model: ${VISION_MODEL}`);
   console.log(`[VISION] Prompt length: ${systemPrompt.length} chars`);
 
-  // Ensure licence is accepted
-  await ensureModelAgreement(ai, VISION_MODEL);
-
   const messages = [
     {
       role: 'user',
-      content: [
-        { type: 'text', text: systemPrompt },
-        { type: 'image', image: imageDataUri }
-      ]
+      content: systemPrompt
     }
   ];
 
   try {
     console.log('[VISION] Sending request to Workers AI...');
-    const response = await ai.run(VISION_MODEL, { messages });
+    const response = await ai.run(VISION_MODEL, {
+      messages,
+      images: [imageDataUri]       // Phi‑3‑Vision needs a separate 'images' array
+    });
     console.log(`[VISION] Response keys: ${Object.keys(response).join(', ')}`);
 
     const result = response.response || '';
@@ -233,7 +199,7 @@ async function runVisionModel(
 }
 
 /**
- * Call text model – logs and auto‑accepts licence
+ * Call Mistral 7B (or Gemma) – standard messages format
  */
 async function runTextModel(
   ai: Env['AI'],
@@ -242,9 +208,6 @@ async function runTextModel(
 ): Promise<string> {
   console.log(`[TEXT] Model: ${TEXT_MODEL}`);
   console.log(`[TEXT] System prompt: ${systemPrompt.length} chars, user msg: ${userMessage.length} chars`);
-
-  // Ensure licence is accepted
-  await ensureModelAgreement(ai, TEXT_MODEL);
 
   const messages = [
     { role: 'system', content: systemPrompt },
@@ -276,7 +239,7 @@ async function runTextModel(
 }
 
 // ============================================================================
-// Action Handlers (with detailed logging)
+// Action Handlers (identical to before, just calling the new models)
 // ============================================================================
 
 async function handleOCRAction(c: HonoContext, request: OCRRequest): Promise<Response> {
