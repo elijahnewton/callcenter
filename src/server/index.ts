@@ -174,12 +174,12 @@ function extractJSON(aiText: string): unknown {
 }
 
 /**
- * Call vision model for image analysis – CORRECTED FOR 11B VISION INSTRUCT
+ * Call vision model for image analysis – uses data URI as string
  */
 async function runVisionModel(
   ai: Env['AI'],
   systemPrompt: string,
-  imageArray: Uint8Array
+  imageDataUri: string   // full data:image/... string
 ): Promise<string> {
   try {
     const messages = [
@@ -187,14 +187,13 @@ async function runVisionModel(
         role: 'user',
         content: [
           { type: 'text', text: systemPrompt },
-          { type: 'image', image: Array.from(imageArray) }
+          { type: 'image', image: imageDataUri }   // string, not array
         ]
       }
     ];
 
     const response = await ai.run(VISION_MODEL, { messages });
 
-    // Llama 3.2 11B Vision returns { response: string }
     const result = response.response || '';
     if (!result) {
       throw new Error('Empty response from vision model');
@@ -205,9 +204,7 @@ async function runVisionModel(
     console.error('Vision model error:', error instanceof Error ? error.message : String(error));
     throw new Error('Vision model failed to process image');
   }
-}
-
-/**
+}/**
  * Call text model for data processing and cleaning
  */
 async function runTextModel(
@@ -252,16 +249,9 @@ async function handleOCRAction(
     return c.json({ success: false, error: 'Missing or invalid image parameter' }, 400);
   }
 
-  if (request.image.length > MAX_IMAGE_BASE64_LENGTH) {
-    return c.json({ success: false, error: 'Image data exceeds maximum size' }, 413);
-  }
-
-  let base64Data: string;
-  try {
-    base64Data = extractBase64(request.image);
-    if (!base64Data) throw new Error('No Base64 data found');
-  } catch {
-    return c.json({ success: false, error: 'Invalid Base64 image data' }, 400);
+  // Optional: validate that it's a data URI
+  if (!request.image.startsWith('data:image/')) {
+    return c.json({ success: false, error: 'Image must be a valid data URI' }, 400);
   }
 
   const systemPrompt = `You are an expert visual data extraction specialist.
@@ -283,9 +273,8 @@ Schema:
 If no contacts found, return: []`;
 
   try {
-    const imageArray = base64ToUint8Array(base64Data);
-    const aiText = await runVisionModel(c.env.AI, systemPrompt, imageArray);
-
+    // Pass the data URI string directly – no decoding
+    const aiText = await runVisionModel(c.env.AI, systemPrompt, request.image);
     const data = extractJSON(aiText) as unknown;
 
     if (!Array.isArray(data)) {
