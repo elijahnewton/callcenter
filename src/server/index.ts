@@ -132,7 +132,7 @@ function extractJSON(aiText: string): unknown {
 
   const trimmed = aiText.trim();
 
-  // Try markdown code block extraction – FIXED REGEX
+  // Try markdown code block extraction
   const jsonBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (jsonBlockMatch?.[1]) {
     const jsonString = jsonBlockMatch[1].trim();
@@ -174,7 +174,7 @@ function extractJSON(aiText: string): unknown {
 }
 
 /**
- * Call vision model for image analysis – FIXED INPUT FORMAT
+ * Call vision model for image analysis – CORRECTED FOR 11B VISION INSTRUCT
  */
 async function runVisionModel(
   ai: Env['AI'],
@@ -194,20 +194,8 @@ async function runVisionModel(
 
     const response = await ai.run(VISION_MODEL, { messages });
 
-    // Llama 3.2 11B Vision Instruct returns { response: string }
+    // Llama 3.2 11B Vision returns { response: string }
     const result = response.response || '';
-    if (!result) {
-      throw new Error('Empty response from vision model');
-    }
-
-    return result;
-  } catch (error) {
-    console.error('Vision model error:', error instanceof Error ? error.message : String(error));
-    throw new Error('Vision model failed to process image');
-  }
-}
-    // FIXED: vision model returns .description
-    const result = response.description || '';
     if (!result) {
       throw new Error('Empty response from vision model');
     }
@@ -220,7 +208,7 @@ async function runVisionModel(
 }
 
 /**
- * Call text model for data processing and cleaning – unchanged (text models use .response)
+ * Call text model for data processing and cleaning
  */
 async function runTextModel(
   ai: Env['AI'],
