@@ -178,11 +178,16 @@ async function runVisionModel(
 
   try {
     console.log('[VISION] Sending request...');
-    const response = await ai.run(MODEL, { messages });
+    const response = await ai.run(MODEL, {
+      messages,
+      // --- FIX 1: Add max_tokens to prevent truncation ---
+      max_tokens: 2048,
+    });
     console.log(`[VISION] Response keys: ${Object.keys(response).join(', ')}`);
 
-    // Gemma multimodal returns a text response, typically in the "response" field
-    const result = response.response || '';
+    // --- FIX 2: Correct response extraction for OpenAI‑compatible format ---
+    const result = response.choices?.[0]?.message?.content || '';
+
     if (!result) {
       console.error('[VISION] Empty response field');
       console.error('[VISION] Full response:', JSON.stringify(response).substring(0, 500));
@@ -216,10 +221,16 @@ async function runTextModel(
 
   try {
     console.log('[TEXT] Sending request...');
-    const response = await ai.run(MODEL, { messages });
+    const response = await ai.run(MODEL, {
+      messages,
+      // --- FIX 1: Add max_tokens to prevent truncation ---
+      max_tokens: 2048,
+    });
     console.log(`[TEXT] Response keys: ${Object.keys(response).join(', ')}`);
 
-    const result = response.response || response.text || '';
+    // --- FIX 2: Correct response extraction for OpenAI‑compatible format ---
+    const result = response.choices?.[0]?.message?.content || '';
+
     if (!result) {
       console.error('[TEXT] Empty response fields');
       console.error('[TEXT] Full response:', JSON.stringify(response).substring(0, 500));
