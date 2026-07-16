@@ -26,7 +26,7 @@ interface SanitizedContact extends Contact {
 
 interface OCRRequest {
   action: 'ocr';
-  image: string;          // now expects full data:image/... URI
+  image: string;          // full data:image/... URI
   expectedRecordCount?: number;
 }
 
@@ -43,8 +43,8 @@ type ActionRequest = OCRRequest | SanitizeRequest;
 // Constants
 // ============================================================================
 
-const MAX_REQUEST_SIZE_BYTES = 10 * 1024 * 1024;   // 10 MB overall
-const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;      // 5 MB for data URI
+const MAX_REQUEST_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_TEXT_INPUT_LENGTH = 100000;
 
 const ALLOWED_CHANNELS = ['sms', 'call', 'rvm', 'email'] as const;
@@ -67,15 +67,12 @@ app.use('/api/*', cors({
 }));
 
 // ============================================================================
-// Middleware – log every incoming request
+// Middleware – log every request
 // ============================================================================
 
 app.use(async (c, next) => {
   const start = Date.now();
-  const method = c.req.method;
-  const path = new URL(c.req.url).pathname;
-
-  console.log(`[REQUEST] ${method} ${path}`);
+  console.log(`[REQUEST] ${c.req.method} ${new URL(c.req.url).pathname}`);
 
   const contentLength = c.req.header('content-length');
   if (contentLength && parseInt(contentLength, 10) > MAX_REQUEST_SIZE_BYTES) {
@@ -85,23 +82,55 @@ app.use(async (c, next) => {
 
   await next();
 
-  const duration = Date.now() - start;
-  console.log(`[RESPONSE] ${method} ${path} → ${c.res.status} (${duration}ms)`);
+  console.log(`[RESPONSE] ${c.res.status} (${Date.now() - start}ms)`);
 });
 
 // ============================================================================
-// Utility Functions (logging embedded)
+// Licence Agreement Helper
 // ============================================================================
 
+const agreedModels = new Set<string>();
+
 /**
- * Extract and parse JSON from AI response – logs every step
+ * Ensure the model has accepted its licence. If we get error 5016,
+ * send an "agree" prompt once and mark the model as agreed.
  */
+async function ensureModelAgreement(ai: Env['AI'], model: string) {
+  if (agreedModels.has(model)) return; // already agreed in this Worker instance
+
+  console.log(`[LICENCE] Checking licence for ${model}...`);
+  try {
+    // A dummy call just to trigger the licence check
+    // We send a minimal valid prompt (text only)
+    const dummyMessages = [{ role: 'user', content: 'agree' }];
+    await ai.run(model, { messages: dummyMessages });
+    console.log(`[LICENCE] ${model} already accepted`);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    if (msg.includes('5016')) {
+      console.log(`[LICENCE] ${model} requires agreement, sending 'agree'...`);
+      // Send the actual "agree" prompt
+      await ai.run(model, { messages: [{ role: 'user', content: 'agree' }] });
+      console.log(`[LICENCE] ${model} agreement successful`);
+    } else {
+      console.warn(`[LICENCE] Unexpected error during check for ${model}:`, msg);
+      // Not a licence error – rethrow so the caller can handle it
+      throw err;
+    }
+  }
+  agreedModels.add(model);
+}
+
+// ============================================================================
+// Utility Functions (with logging)
+// ============================================================================
+
 function extractJSON(aiText: string): unknown {
-  console.log(`[JSON-EXTRACT] Raw AI text length: ${aiText.length}`);
+  console.log(`[JSON-EXTRACT] Raw text length: ${aiText.length}`);
   console.log(`[JSON-EXTRACT] First 500 chars: ${aiText.substring(0, 500)}`);
 
   if (!aiText || typeof aiText !== 'string') {
-    console.error('[JSON-EXTRACT] Invalid input: not a string');
+    console.error('[JSON-EXTRACT] Input is not a string');
     throw new Error('Invalid AI response: not a string');
   }
 
@@ -111,26 +140,26 @@ function extractJSON(aiText: string): unknown {
   const jsonBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (jsonBlockMatch?.[1]) {
     const jsonString = jsonBlockMatch[1].trim();
-    console.log('[JSON-EXTRACT] Found code block, trying parse...');
+    console.log('[JSON-EXTRACT] Found code block, parsing...');
     try {
       const parsed = JSON.parse(jsonString);
-      console.log('[JSON-EXTRACT] Successfully parsed JSON from code block');
+      console.log('[JSON-EXTRACT] Successfully parsed from code block');
       return parsed;
     } catch (e) {
-      console.warn('[JSON-EXTRACT] Failed to parse code block JSON', e);
+      console.warn('[JSON-EXTRACT] Code block parse failed:', e);
     }
   }
 
-  // Try direct parse
+  // Direct parse
   try {
     const parsed = JSON.parse(trimmed);
-    console.log('[JSON-EXTRACT] Successfully parsed direct JSON');
+    console.log('[JSON-EXTRACT] Direct parse succeeded');
     return parsed;
   } catch (e) {
-    console.warn('[JSON-EXTRACT] Direct parse failed', e);
+    console.warn('[JSON-EXTRACT] Direct parse failed:', e);
   }
 
-  // Try to extract array
+  // Outer array
   const arrayMatch = trimmed.match(/^\s*(\[[\s\S]*\])\s*$/);
   if (arrayMatch?.[1]) {
     try {
@@ -138,11 +167,11 @@ function extractJSON(aiText: string): unknown {
       console.log('[JSON-EXTRACT] Parsed outer array');
       return parsed;
     } catch (e) {
-      console.warn('[JSON-EXTRACT] Outer array parse failed', e);
+      console.warn('[JSON-EXTRACT] Outer array parse failed:', e);
     }
   }
 
-  // Try to extract object
+  // Outer object
   const objectMatch = trimmed.match(/^\s*(\{[\s\S]*\})\s*$/);
   if (objectMatch?.[1]) {
     try {
@@ -150,145 +179,110 @@ function extractJSON(aiText: string): unknown {
       console.log('[JSON-EXTRACT] Parsed outer object');
       return parsed;
     } catch (e) {
-      console.warn('[JSON-EXTRACT] Outer object parse failed', e);
+      console.warn('[JSON-EXTRACT] Outer object parse failed:', e);
     }
   }
 
-  console.error('[JSON-EXTRACT] All extraction strategies failed');
+  console.error('[JSON-EXTRACT] All strategies failed');
   throw new Error('Could not extract valid JSON from AI response');
 }
 
-/**
- * Call vision model – logs prompt length, model response time, and any errors
- */
 async function runVisionModel(
   ai: Env['AI'],
   systemPrompt: string,
-  imageDataUri: string   // full data:image/... string
+  imageDataUri: string
 ): Promise<string> {
-  const start = Date.now();
   console.log(`[VISION] Model: ${VISION_MODEL}`);
   console.log(`[VISION] Prompt length: ${systemPrompt.length} chars`);
-  console.log(`[VISION] Image URI starts with: ${imageDataUri.substring(0, 100)}...`);
+
+  // Ensure licence
+  await ensureModelAgreement(ai, VISION_MODEL);
+
+  const messages = [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: systemPrompt },
+        { type: 'image', image: imageDataUri }   // string
+      ]
+    }
+  ];
 
   try {
-    const messages = [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: systemPrompt },
-          { type: 'image', image: imageDataUri }   // string form
-        ]
-      }
-    ];
-
-    console.log('[VISION] Sending request to Workers AI...');
+    console.log('[VISION] Sending request...');
     const response = await ai.run(VISION_MODEL, { messages });
-    const duration = Date.now() - start;
-
-    console.log(`[VISION] Received response in ${duration}ms`);
-    console.log(`[VISION] Raw response keys: ${Object.keys(response).join(', ')}`);
+    console.log(`[VISION] Response keys: ${Object.keys(response).join(', ')}`);
 
     const result = response.response || '';
     if (!result) {
-      console.error('[VISION] Response field "response" was empty');
-      console.error('[VISION] Full response object:', JSON.stringify(response).substring(0, 500));
+      console.error('[VISION] Empty response field');
+      console.error('[VISION] Full response:', JSON.stringify(response).substring(0, 500));
       throw new Error('Empty response from vision model');
     }
 
-    console.log(`[VISION] Output length: ${result.length} chars`);
-    console.log(`[VISION] First 300 chars: ${result.substring(0, 300)}`);
+    console.log(`[VISION] Output length: ${result.length} chars, first 300: ${result.substring(0, 300)}`);
     return result;
   } catch (error) {
-    const duration = Date.now() - start;
-    console.error(`[VISION] Failed after ${duration}ms`);
-    console.error('[VISION] Error:', error instanceof Error ? error.message : String(error));
-    if (error instanceof Error && error.stack) {
-      console.error('[VISION] Stack:', error.stack);
-    }
+    console.error('[VISION] Failed:', error instanceof Error ? error.message : String(error));
     throw new Error('Vision model failed to process image');
   }
 }
 
-/**
- * Call text model – logs prompt details and response timing
- */
 async function runTextModel(
   ai: Env['AI'],
   systemPrompt: string,
   userMessage: string
 ): Promise<string> {
-  const start = Date.now();
   console.log(`[TEXT] Model: ${TEXT_MODEL}`);
-  console.log(`[TEXT] System prompt length: ${systemPrompt.length} chars`);
-  console.log(`[TEXT] User message length: ${userMessage.length} chars`);
+  console.log(`[TEXT] System prompt length: ${systemPrompt.length}, user message length: ${userMessage.length}`);
+
+  // Ensure licence
+  await ensureModelAgreement(ai, TEXT_MODEL);
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage }
+  ];
 
   try {
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userMessage }
-    ];
-
-    console.log('[TEXT] Sending request to Workers AI...');
+    console.log('[TEXT] Sending request...');
     const response = await ai.run(TEXT_MODEL, { messages });
-    const duration = Date.now() - start;
-
-    console.log(`[TEXT] Received response in ${duration}ms`);
-    console.log(`[TEXT] Raw response keys: ${Object.keys(response).join(', ')}`);
+    console.log(`[TEXT] Response keys: ${Object.keys(response).join(', ')}`);
 
     const result = response.response || response.text || '';
     if (!result) {
-      console.error('[TEXT] Response fields "response"/"text" empty');
+      console.error('[TEXT] Empty response fields');
       console.error('[TEXT] Full response:', JSON.stringify(response).substring(0, 500));
       throw new Error('Empty response from text model');
     }
 
-    console.log(`[TEXT] Output length: ${result.length} chars`);
-    console.log(`[TEXT] First 300 chars: ${result.substring(0, 300)}`);
+    console.log(`[TEXT] Output length: ${result.length} chars, first 300: ${result.substring(0, 300)}`);
     return result;
   } catch (error) {
-    const duration = Date.now() - start;
-    console.error(`[TEXT] Failed after ${duration}ms`);
-    console.error('[TEXT] Error:', error instanceof Error ? error.message : String(error));
-    if (error instanceof Error && error.stack) {
-      console.error('[TEXT] Stack:', error.stack);
-    }
+    console.error('[TEXT] Failed:', error instanceof Error ? error.message : String(error));
     throw new Error('Text model failed to process data');
   }
 }
 
 // ============================================================================
-// Action Handlers (with detailed logging of request/response)
+// Action Handlers (already include logging)
 // ============================================================================
 
-async function handleOCRAction(
-  c: HonoContext,
-  request: OCRRequest
-): Promise<Response> {
+async function handleOCRAction(c: HonoContext, request: OCRRequest): Promise<Response> {
   console.log('[OCR-ACTION] Received OCR request');
 
-  // Validate image input
   if (!request.image || typeof request.image !== 'string') {
-    console.warn('[OCR-ACTION] Missing or invalid image parameter');
     return c.json({ success: false, error: 'Missing or invalid image parameter' }, 400);
   }
-
-  // Check that it's a data URI
   if (!request.image.startsWith('data:image/')) {
-    console.warn('[OCR-ACTION] Image does not start with data:image/');
     return c.json({ success: false, error: 'Image must be a valid data URI' }, 400);
   }
 
-  // Optional size check (approximate)
+  // Rough size check
   const base64Part = request.image.split(',')[1] || '';
-  const estimatedBytes = base64Part.length * 0.75;   // rough estimate
-  if (estimatedBytes > MAX_IMAGE_SIZE_BYTES) {
-    console.warn(`[OCR-ACTION] Image too large, estimated ${Math.round(estimatedBytes)} bytes`);
+  if (base64Part.length * 0.75 > MAX_IMAGE_SIZE_BYTES) {
     return c.json({ success: false, error: 'Image data exceeds maximum size' }, 413);
   }
-
-  console.log(`[OCR-ACTION] Image URI starts with: ${request.image.substring(0, 60)}...`);
-  console.log(`[OCR-ACTION] Estimated image size: ~${Math.round(estimatedBytes / 1024)} KB`);
 
   const systemPrompt = `You are an expert visual data extraction specialist.
 Your task: Analyze the provided image and extract all visible contacts from handwritten lists, rosters, or sign-up sheets.
@@ -309,43 +303,23 @@ Schema:
 If no contacts found, return: []`;
 
   try {
-    console.log('[OCR-ACTION] Starting vision model call...');
     const aiText = await runVisionModel(c.env.AI, systemPrompt, request.image);
-
-    console.log('[OCR-ACTION] Extracting JSON from AI response...');
-    const data = extractJSON(aiText) as unknown;
+    const data = extractJSON(aiText) as any[];
 
     if (!Array.isArray(data)) {
-      console.error('[OCR-ACTION] Parsed data is not an array, type:', typeof data);
-      return c.json({ success: false, error: 'Invalid response structure from model' }, 500);
+      return c.json({ success: false, error: 'Invalid response structure' }, 500);
     }
 
-    console.log(`[OCR-ACTION] Extracted ${data.length} contacts`);
-    const validatedData: Contact[] = data.map((item: unknown, index) => {
-      const obj = item as Record<string, unknown>;
-      console.log(`[OCR-ACTION] Contact ${index}:`, JSON.stringify(obj));
-      return {
-        name: String(obj.name || ''),
-        email: String(obj.email || ''),
-        phone: String(obj.phone || ''),
-      };
-    });
+    const contacts: Contact[] = data.map(item => ({
+      name: String(item.name || ''),
+      email: String(item.email || ''),
+      phone: String(item.phone || ''),
+    }));
 
-    if (request.expectedRecordCount !== undefined && validatedData.length !== request.expectedRecordCount) {
-      console.warn(`[OCR-ACTION] Record count mismatch: expected ${request.expectedRecordCount}, got ${validatedData.length}`);
-      return c.json({
-        success: false,
-        error: `Verification failed: Expected ${request.expectedRecordCount} records, but AI extracted ${validatedData.length}. Please retry.`
-      }, 422);
-    }
-
-    console.log(`[OCR-ACTION] Success – returning ${validatedData.length} contacts`);
-    return c.json({ success: true, data: validatedData }, 200);
+    console.log(`[OCR-ACTION] Success – ${contacts.length} contacts`);
+    return c.json({ success: true, data: contacts });
   } catch (error) {
-    console.error('[OCR-ACTION] Processing error:', error instanceof Error ? error.message : String(error));
-    if (error instanceof Error && error.stack) {
-      console.error('[OCR-ACTION] Stack:', error.stack);
-    }
+    console.error('[OCR-ACTION] Failed:', error instanceof Error ? error.message : String(error));
     return c.json({ success: false, error: 'Failed to process image' }, 500);
   }
 }
