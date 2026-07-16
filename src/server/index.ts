@@ -182,12 +182,30 @@ async function runVisionModel(
   imageArray: Uint8Array
 ): Promise<string> {
   try {
-    // Llama 3.2 Vision expects { image: number[], prompt: string }
-    const response = await ai.run(VISION_MODEL, {
-      image: Array.from(imageArray),
-      prompt: systemPrompt,
-    });
+    const messages = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: systemPrompt },
+          { type: 'image', image: Array.from(imageArray) }
+        ]
+      }
+    ];
 
+    const response = await ai.run(VISION_MODEL, { messages });
+
+    // Llama 3.2 11B Vision Instruct returns { response: string }
+    const result = response.response || '';
+    if (!result) {
+      throw new Error('Empty response from vision model');
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Vision model error:', error instanceof Error ? error.message : String(error));
+    throw new Error('Vision model failed to process image');
+  }
+}
     // FIXED: vision model returns .description
     const result = response.description || '';
     if (!result) {
