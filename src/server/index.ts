@@ -2,15 +2,11 @@ import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
 
 // ============================================================================
-// Types & Interfaces
+// Types
 // ============================================================================
 
 interface Bindings {
-  AI: Env['AI'];
-}
-
-interface Env {
-  AI: any;
+  AI: any; // Cloudflare Workers AI binding
 }
 
 interface Contact {
@@ -26,7 +22,7 @@ interface SanitizedContact extends Contact {
 
 interface OCRRequest {
   action: 'ocr';
-  image: string;          // full data:image/... URI
+  image: string;
   expectedRecordCount?: number;
 }
 
@@ -44,16 +40,16 @@ type ActionRequest = OCRRequest | SanitizeRequest;
 // ============================================================================
 
 const MAX_REQUEST_SIZE_BYTES = 10 * 1024 * 1024;
-const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
-const MAX_TEXT_INPUT_LENGTH = 100000;
+const MAX_IMAGE_SIZE_BYTES  = 5 * 1024 * 1024;
+const MAX_TEXT_INPUT_LENGTH = 100_000;
 
 const ALLOWED_CHANNELS = ['sms', 'call', 'rvm', 'email'] as const;
 
-// Our one and only model – Gemma 4 handles text AND vision
+// Gemma 4 — handles both text and vision
 const MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 // ============================================================================
-// Hono App Setup
+// Hono App
 // ============================================================================
 
 type HonoContext = Context<{ Bindings: Bindings }>;
@@ -68,87 +64,75 @@ app.use('/api/*', cors({
 }));
 
 // ============================================================================
-// Middleware – log every request
+// Middleware — logging + size guard
 // ============================================================================
 
 app.use(async (c, next) => {
   const start = Date.now();
-  console.log(`[REQUEST] ${c.req.method} ${new URL(c.req.url).pathname}`);
+  const path = c.req.path;
 
   const contentLength = c.req.header('content-length');
   if (contentLength && parseInt(contentLength, 10) > MAX_REQUEST_SIZE_BYTES) {
-    console.warn(`[REJECTED] Body too large: ${contentLength} bytes`);
     return c.json({ success: false, error: 'Request body exceeds maximum size' }, 413);
   }
 
   await next();
 
-  console.log(`[RESPONSE] \( {c.res.status} ( \){Date.now() - start}ms)`);
+  console.log(`[RES] ${c.res.status} ${c.req.method} ${path} ${Date.now() - start}ms`);
 });
 
 // ============================================================================
-// Utility Functions
+// Utility — JSON extraction from AI responses
 // ============================================================================
 
 function extractJSON(aiText: string): unknown {
-  console.log(`[JSON-EXTRACT] Raw text length: ${aiText.length}`);
-  console.log(`[JSON-EXTRACT] First 800 chars: ${aiText.substring(0, 800)}`);
-
   if (!aiText || typeof aiText !== 'string') {
-    console.error('[JSON-EXTRACT] Input is not a string');
     throw new Error('Invalid AI response: not a string');
   }
 
-  let trimmed = aiText.trim();
+  let text = aiText.trim();
 
-  // Remove markdown code blocks
-  const jsonBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (jsonBlockMatch?.[1]) {
-    trimmed = jsonBlockMatch[1].trim();
+  // Strip markdown code fences
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fence?.[1]) {
+    text = fence[1].trim();
   }
 
-  // Try to extract largest JSON array (handles truncation)
-  const arrayMatch = trimmed.match(/\[\s*\{[\s\S]*?\}\s*(?:,\s*\{[\s\S]*?\}\s*)*\]?/);
-  if (arrayMatch) {
-    trimmed = arrayMatch[0];
-    // Ensure it ends with ]
-    if (!trimmed.endsWith(']')) trimmed += ']';
+  // If surrounding noise exists, extract the JSON payload
+  if (!text.startsWith('[') && !text.startsWith('{')) {
+    const arr = text.match(/\[[\s\S]*\]/);
+    if (arr) {
+      text = arr[0];
+    } else {
+      const obj = text.match(/\{[\s\S]*\}/);
+      if (obj) text = obj[0];
+    }
+  }
+
+  // Repair truncated arrays
+  if (text.startsWith('[') && !text.endsWith(']')) {
+    text += ']';
   }
 
   try {
-    const parsed = JSON.parse(trimmed);
-    console.log('[JSON-EXTRACT] Successfully parsed JSON');
-    return parsed;
+    return JSON.parse(text);
   } catch (e) {
-    console.warn('[JSON-EXTRACT] Primary parse failed:', (e as Error).message);
+    throw new Error(`JSON parse failed: ${(e as Error).message} | text: ${text.slice(0, 200)}`);
   }
-
-  // Fallback: direct parse of trimmed text
-  try {
-    const parsed = JSON.parse(trimmed);
-    console.log('[JSON-EXTRACT] Direct parse succeeded');
-    return parsed;
-  } catch (e) {
-    console.warn('[JSON-EXTRACT] Direct parse failed:', (e as Error).message);
-  }
-
-  console.error('[JSON-EXTRACT] All strategies failed');
-  throw new Error('Could not extract valid JSON from AI response');
 }
 
-/**
- * Robust response extraction for Gemma 4 (handles OpenAI-compatible + native formats)
- */
-function extractAIContent(response: any): string {
-  console.log(`[EXTRACT] Response keys: ${Object.keys(response).join(', ')}`);
+// ============================================================================
+// Utility — extract text content from various AI response shapes
+// ============================================================================
 
-  // OpenAI chat completions format (most common for Gemma 4)
-  if (response.choices?.[0]?.message?.content) {
+function extractAIContent(response: any): string {
+  // OpenAI chat completions format (Gemma 4 uses this)
+  if (response?.choices?.[0]?.message?.content) {
     return response.choices[0].message.content;
   }
 
   // Native Workers AI format
-  if (response.response) {
+  if (response?.response) {
     return response.response;
   }
 
@@ -157,103 +141,72 @@ function extractAIContent(response: any): string {
     return response;
   }
 
-  // Deep fallback
+  // Deep fallback — regex search for "content" field
   const str = JSON.stringify(response);
-  const contentMatch = str.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-  if (contentMatch?.[1]) {
-    return contentMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n');
+  const match = str.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (match?.[1]) {
+    return match[1].replace(/\\"/g, '"').replace(/\\n/g, '\n');
   }
 
   return '';
 }
 
-/**
- * Run Gemma 4 in vision mode (OCR)
- */
+// ============================================================================
+// AI Model Wrappers
+// ============================================================================
+
 async function runVisionModel(
-  ai: Env['AI'],
+  ai: Bindings['AI'],
   systemPrompt: string,
   imageDataUri: string
 ): Promise<string> {
-  console.log(`[VISION] Model: ${MODEL}`);
-  console.log(`[VISION] Prompt length: ${systemPrompt.length} chars`);
+  const response = await ai.run(MODEL, {
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: systemPrompt },
+          { type: 'image_url', image_url: { url: imageDataUri } },
+        ],
+      },
+    ],
+    max_tokens: 8192,  // generous — reasoning models consume tokens for thinking
+    temperature: 0.1,
+  });
 
-  const messages = [
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: systemPrompt },
-        {
-          type: 'image_url',
-          image_url: { url: imageDataUri }
-        }
-      ]
-    }
-  ];
+  const result = extractAIContent(response);
 
-  try {
-    console.log('[VISION] Sending request...');
-    const response = await ai.run(MODEL, {
-      messages,
-      max_tokens: 4096,
-      temperature: 0.1,
-    });
-
-    const result = extractAIContent(response);
-
-    if (!result || result.trim().length < 20) {
-      console.error('[VISION] Empty response');
-      console.error('[VISION] Full response:', JSON.stringify(response).substring(0, 600));
-      throw new Error('Empty response from vision model');
-    }
-
-    console.log(`[VISION] Output length: ${result.length} chars`);
-    return result;
-  } catch (error) {
-    console.error('[VISION] Failed:', error instanceof Error ? error.message : String(error));
-    throw new Error('Vision model failed to process image');
+  // FIX: Only reject truly empty/whitespace responses.
+  // "[]" is a valid response when no contacts are found.
+  if (!result || !result.trim()) {
+    throw new Error('Empty response from vision model');
   }
+
+  return result;
 }
 
-/**
- * Run Gemma 4 in text-only mode (Sanitize)
- */
 async function runTextModel(
-  ai: Env['AI'],
+  ai: Bindings['AI'],
   systemPrompt: string,
   userMessage: string
 ): Promise<string> {
-  console.log(`[TEXT] Model: ${MODEL}`);
-  console.log(`[TEXT] System prompt: ${systemPrompt.length} chars, user msg: ${userMessage.length} chars`);
+  const response = await ai.run(MODEL, {
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage },
+    ],
+    max_tokens: 8192,
+    temperature: 0.1,
+  });
 
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: userMessage }
-  ];
+  const result = extractAIContent(response);
 
-  try {
-    console.log('[TEXT] Sending request...');
-    const response = await ai.run(MODEL, {
-      messages,
-      max_tokens: 4096,        // Increased for larger contact lists
-      temperature: 0.1,
-    });
-
-    const result = extractAIContent(response);
-
-    if (!result || result.trim().length < 20) {
-      console.error('[TEXT] Empty response fields');
-      console.error('[TEXT] Full response:', JSON.stringify(response).substring(0, 800));
-      throw new Error('Empty response from text model');
-    }
-
-    console.log(`[TEXT] Output length: ${result.length} chars`);
-    console.log(`[TEXT] First 500 chars: ${result.substring(0, 500)}`);
-    return result;
-  } catch (error) {
-    console.error('[TEXT] Failed:', error instanceof Error ? error.message : String(error));
-    throw new Error('Text model failed to process data');
+  // FIX: Was `result.trim().length < 20` which rejected valid "[]" responses.
+  if (!result || !result.trim()) {
+    throw new Error('Empty response from text model');
   }
+
+  return result;
 }
 
 // ============================================================================
@@ -261,12 +214,7 @@ async function runTextModel(
 // ============================================================================
 
 async function handleOCRAction(c: HonoContext, request: OCRRequest): Promise<Response> {
-  console.log('[OCR-ACTION] Received OCR request');
-
-  if (!request.image || typeof request.image !== 'string') {
-    return c.json({ success: false, error: 'Missing or invalid image parameter' }, 400);
-  }
-  if (!request.image.startsWith('data:image/')) {
+  if (!request.image?.startsWith('data:image/')) {
     return c.json({ success: false, error: 'Image must be a valid data URI' }, 400);
   }
 
@@ -295,30 +243,27 @@ If no contacts found, return: []`;
 
   try {
     const aiText = await runVisionModel(c.env.AI, systemPrompt, request.image);
-    const data = extractJSON(aiText) as unknown;
+    const data = extractJSON(aiText);
 
     if (!Array.isArray(data)) {
       return c.json({ success: false, error: 'Invalid response structure from model' }, 500);
     }
 
-    const contacts: Contact[] = data.map((item: any) => ({
-      name: String(item.name || ''),
-      email: String(item.email || ''),
-      phone: String(item.phone || ''),
+    const contacts: Contact[] = (data as any[]).map((item) => ({
+      name:  String(item?.name  ?? ''),
+      email: String(item?.email ?? ''),
+      phone: String(item?.phone ?? ''),
     }));
 
-    console.log(`[OCR-ACTION] Success – extracted ${contacts.length} contacts`);
-    return c.json({ success: true, data: contacts }, 200);
+    console.log(`[OCR] Extracted ${contacts.length} contacts`);
+    return c.json({ success: true, data: contacts });
   } catch (error) {
-    console.error('[OCR-ACTION] Processing error:', error instanceof Error ? error.message : String(error));
+    console.error('[OCR]', error instanceof Error ? error.message : String(error));
     return c.json({ success: false, error: 'Failed to process image' }, 500);
   }
 }
 
 async function handleSanitizeAction(c: HonoContext, request: SanitizeRequest): Promise<Response> {
-  console.log('[SANITIZE-ACTION] Received sanitize request');
-  console.log(`[SANITIZE-ACTION] Channel: ${request.channel}`);
-
   if (!request.text || typeof request.text !== 'string') {
     return c.json({ success: false, error: 'Missing or invalid text parameter' }, 400);
   }
@@ -329,11 +274,11 @@ async function handleSanitizeAction(c: HonoContext, request: SanitizeRequest): P
     return c.json({ success: false, error: 'Text input exceeds maximum size' }, 413);
   }
 
-  const channelRequirements: Record<string, string> = {
-    sms: 'A valid phone number is REQUIRED.',
-    call: 'A valid phone number is REQUIRED.',
-    rvm: 'A valid phone number is REQUIRED.',
-    email: 'A valid email address is REQUIRED.'
+  const channelRequirement: Record<string, string> = {
+    sms:   'A valid phone number is REQUIRED.',
+    call:  'A valid phone number is REQUIRED.',
+    rvm:   'A valid phone number is REQUIRED.',
+    email: 'A valid email address is REQUIRED.',
   };
 
   const systemPrompt = `You are an expert contact data cleaning and validation agent.
@@ -345,7 +290,7 @@ Normalization rules:
 3. Email addresses: Validate basic email syntax (must contain @ and domain)
 4. Status: Mark as "valid" or "invalid" based on campaign channel requirements
    - Campaign channel: "${request.channel}"
-   - Requirement: ${channelRequirements[request.channel] || 'Unknown'}
+   - Requirement: ${channelRequirement[request.channel] ?? 'Unknown'}
 5. Notes: Provide brief explanation (max 30 chars) if marked invalid, otherwise empty string
 
 Output format MUST be valid JSON only. No explanations, markdown, or other text.
@@ -358,44 +303,40 @@ Schema:
 
 If no valid data, return: []`;
 
+  // FIX: Was broken template literal with escaped braces
+  const userMessage = `Clean and validate this contact list for ${request.channel} campaigns:\n\n${request.text}`;
+
   try {
-    const userMessage = `Clean and validate this contact list for \( {request.channel} campaigns:\n\n \){request.text}`;
     const aiText = await runTextModel(c.env.AI, systemPrompt, userMessage);
-    const data = extractJSON(aiText) as unknown;
+    const data = extractJSON(aiText);
 
     if (!Array.isArray(data)) {
       return c.json({ success: false, error: 'Invalid response structure from model' }, 500);
     }
 
-    const validatedData: SanitizedContact[] = data.map((item: any) => ({
-      name: String(item.name || ''),
-      email: String(item.email || ''),
-      phone: String(item.phone || ''),
-      status: item.status === 'valid' ? 'valid' : 'invalid',
-      notes: String(item.notes || ''),
+    const validatedData: SanitizedContact[] = (data as any[]).map((item) => ({
+      name:   String(item?.name   ?? ''),
+      email:  String(item?.email  ?? ''),
+      phone:  String(item?.phone  ?? ''),
+      status: item?.status === 'valid' ? 'valid' as const : 'invalid' as const,
+      notes:  String(item?.notes  ?? ''),
     }));
 
-    console.log(`[SANITIZE-ACTION] Success – returned ${validatedData.length} contacts`);
-    return c.json({ success: true, data: validatedData }, 200);
+    console.log(`[SANITIZE] Returned ${validatedData.length} contacts`);
+    return c.json({ success: true, data: validatedData });
   } catch (error) {
-    console.error('[SANITIZE-ACTION] Processing error:', error instanceof Error ? error.message : String(error));
+    console.error('[SANITIZE]', error instanceof Error ? error.message : String(error));
     return c.json({ success: false, error: 'Failed to process contact data' }, 500);
   }
 }
 
 // ============================================================================
-// Route Handlers
+// Routes
 // ============================================================================
 
 app.post('/api/companion', async (c) => {
-  console.log('[API] /api/companion called');
   try {
     const request = await c.req.json<ActionRequest>();
-    console.log(`[API] Action: ${request.action}`);
-
-    if (!request.action || typeof request.action !== 'string') {
-      return c.json({ success: false, error: 'Missing or invalid action parameter' }, 400);
-    }
 
     switch (request.action) {
       case 'ocr':
@@ -407,24 +348,23 @@ app.post('/api/companion', async (c) => {
     }
   } catch (error) {
     if (error instanceof SyntaxError) {
-      console.error('[API] JSON parse error:', error.message);
       return c.json({ success: false, error: 'Invalid JSON in request body' }, 400);
     }
-    console.error('[API] Unexpected error:', error instanceof Error ? error.message : String(error));
+    console.error('[COMPANION]', error instanceof Error ? error.message : String(error));
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
 
-app.get('/api/health', (c) => {
-  return c.json({ status: 'ok', timestamp: new Date().toISOString() }, 200);
-});
+app.get('/api/health', (c) =>
+  c.json({ status: 'ok', timestamp: new Date().toISOString() })
+);
 
-app.notFound((c) => {
-  return c.json({ success: false, error: 'Endpoint not found' }, 404);
-});
+app.notFound((c) =>
+  c.json({ success: false, error: 'Endpoint not found' }, 404)
+);
 
 app.onError((err, c) => {
-  console.error('[ONERROR] Unhandled error:', err instanceof Error ? err.message : String(err));
+  console.error('[ERROR]', err instanceof Error ? err.message : String(err));
   return c.json({ success: false, error: 'Internal server error' }, 500);
 });
 
