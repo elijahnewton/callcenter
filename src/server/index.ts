@@ -7,6 +7,8 @@ import { cors } from 'hono/cors';
 
 interface Bindings {
   AI: any; // Cloudflare Workers AI binding
+  DB: any; // D1Database
+  GROUP_COORDINATOR: any; // DurableObjectNamespace
 }
 
 interface Contact {
@@ -368,4 +370,57 @@ app.onError((err, c) => {
   return c.json({ success: false, error: 'Internal server error' }, 500);
 });
 
+// ============================================================================
+// Group Routes
+// ============================================================================
+
+app.post('/api/groups', async (c) => {
+  const { name } = await c.req.json<{ name: string }>();
+  const id = crypto.randomUUID();
+  await c.env.DB.prepare('INSERT INTO groups (id, name) VALUES (?, ?)').bind(id, name).run();
+  return c.json({ success: true, groupId: id });
+});
+
+app.post('/api/groups/:groupId/users', async (c) => {
+  const groupId = c.req.param('groupId');
+  const { name, role } = await c.req.json<{ name: string, role: string }>();
+  const id = crypto.randomUUID();
+  await c.env.DB.prepare('INSERT INTO users (id, group_id, role, name) VALUES (?, ?, ?, ?)').bind(id, groupId, role, name).run();
+  return c.json({ success: true, userId: id });
+});
+
+app.post('/api/groups/:groupId/contacts', async (c) => {
+  const groupId = c.req.param('groupId');
+  const { contacts } = await c.req.json<{ contacts: { name: string, phone: string, notes?: string }[] }>();
+  
+  const stmts = contacts.map(contact => {
+    return c.env.DB.prepare('INSERT INTO contacts (id, group_id, name, phone, notes) VALUES (?, ?, ?, ?, ?)')
+      .bind(crypto.randomUUID(), groupId, contact.name, contact.phone, contact.notes || '');
+  });
+  
+  await c.env.DB.batch(stmts);
+  return c.json({ success: true, count: contacts.length });
+});
+
+app.get('/api/groups/:groupId/contacts', async (c) => {
+  const groupId = c.req.param('groupId');
+  const { results } = await c.env.DB.prepare('SELECT * FROM contacts WHERE group_id = ?').bind(groupId).all();
+  return c.json({ success: true, data: results });
+});
+
+app.get('/api/groups/:groupId/ws', (c) => {
+  const upgradeHeader = c.req.header('Upgrade');
+  if (!upgradeHeader || upgradeHeader !== 'websocket') {
+    return new Response('Expected Upgrade: websocket', { status: 426 });
+  }
+
+  const groupId = c.req.param('groupId');
+  const id = c.env.GROUP_COORDINATOR.idFromName(groupId);
+  const stub = c.env.GROUP_COORDINATOR.get(id);
+
+  // Pass the request to the Durable Object
+  return stub.fetch(c.req.raw);
+});
+
+export { GroupCoordinator } from './durable-object';
 export default app;

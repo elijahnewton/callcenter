@@ -8,13 +8,14 @@ import { SetupScreen } from './components/SetupScreen';
 import { UploadZone } from './components/UploadZone';
 import { Teleprompter } from './components/Teleprompter';
 import { TrackingPanel } from './components/TrackingPanel';
-import CampaignCompanion from './components/CampaignCompanion'; // 👈 1. Import your new companion component
+import CampaignCompanion from './components/CampaignCompanion';
+import { TeamDashboard } from './components/TeamDashboard';
 
 const DEFAULT_SCRIPT =
   'Hello [Name], my name is [CallerName] calling from "[BranchName]". I am calling to know how you\'re doing and to invite you for service.';
 
 type AlertType = 'success' | 'error' | 'info';
-type ViewType = 'main' | 'companion'; // 👈 2. Define our view types
+type ViewType = 'main' | 'companion' | 'team';
 
 declare global {
   interface WindowEventMap {
@@ -215,9 +216,12 @@ export default function App() {
     );
   }
 
-  // 4. Intercept rendering if the user switched to the AI Companion screen
   if (view === 'companion') {
     return <CampaignCompanion onBack={() => setView('main')} />;
+  }
+  
+  if (view === 'team') {
+    return <TeamDashboard groupId="demo-group" userId={callerName} onLeave={() => setView('main')} />;
   }
 
   return (
@@ -254,11 +258,14 @@ export default function App() {
 
         {activeRecords.length === 0 ? (
           /* 5. Pass the navigate function down to the UploadZone component */
-          <UploadZone 
-            onRecordsParsed={handleRecordsParsed} 
-            onAlert={showAlert} 
-            onNavigate={() => setView('companion')} 
-          />
+          <div>
+            <UploadZone 
+              onRecordsParsed={handleRecordsParsed} 
+              onAlert={showAlert} 
+              onNavigate={() => setView('companion')} 
+            />
+            <button className="install-btn" style={{marginTop: '15px'}} onClick={() => setView('team')}>Enter Team Mode</button>
+          </div>
         ) : (
           <>
             <div className="progress-container">

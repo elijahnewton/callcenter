@@ -12,3 +12,17 @@ binding = "ASSETS"
 [observability.logs]
 enabled = true
 invocation_logs = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "campaign-db"
+database_id = "local-db"
+migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "GROUP_COORDINATOR"
+class_name = "GroupCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["GroupCoordinator"]
