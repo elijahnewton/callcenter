@@ -160,24 +160,21 @@ async function runVisionModel(
   systemPrompt: string,
   imageDataUri: string
 ): Promise<string> {
+  // FIX: The native ai.run binding expects the image string at the top level
   const response = await ai.run(MODEL, {
     messages: [
       {
         role: 'user',
-        content: [
-          { type: 'text', text: systemPrompt },
-          { type: 'image_url', image_url: { url: imageDataUri } },
-        ],
+        content: systemPrompt,
       },
     ],
-    max_tokens: 8192,  // generous — reasoning models consume tokens for thinking
+    image: imageDataUri, 
+    max_tokens: 8192,
     temperature: 0.1,
   });
 
   const result = extractAIContent(response);
 
-  // FIX: Only reject truly empty/whitespace responses.
-  // "[]" is a valid response when no contacts are found.
   if (!result || !result.trim()) {
     throw new Error('Empty response from vision model');
   }
@@ -201,7 +198,6 @@ async function runTextModel(
 
   const result = extractAIContent(response);
 
-  // FIX: Was `result.trim().length < 20` which rejected valid "[]" responses.
   if (!result || !result.trim()) {
     throw new Error('Empty response from text model');
   }
@@ -219,7 +215,12 @@ async function handleOCRAction(c: HonoContext, request: OCRRequest): Promise<Res
   }
 
   const base64Part = request.image.split(',')[1] || '';
-  if (base64Part.length * 0.75 > MAX_IMAGE_SIZE_BYTES) {
+  
+  // FIX: Accurate calculation handling base64 padding characters
+  const padding = base64Part.endsWith('==') ? 2 : base64Part.endsWith('=') ? 1 : 0;
+  const exactByteSize = (base64Part.length * 0.75) - padding;
+
+  if (exactByteSize > MAX_IMAGE_SIZE_BYTES) {
     return c.json({ success: false, error: 'Image data exceeds maximum size' }, 413);
   }
 
@@ -303,7 +304,6 @@ Schema:
 
 If no valid data, return: []`;
 
-  // FIX: Was broken template literal with escaped braces
   const userMessage = `Clean and validate this contact list for ${request.channel} campaigns:\n\n${request.text}`;
 
   try {
