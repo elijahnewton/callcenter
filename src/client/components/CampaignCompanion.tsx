@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect, ChangeEvent } from 'react';
 import * as XLSX from 'xlsx';
-import { ArrowLeft, Camera, Sparkles, FileSpreadsheet, FileText, Play, Info } from 'lucide-react';
-import './CampaignCompanion.css';
+import { 
+  ArrowLeft, Camera, Sparkles, FileSpreadsheet, FileText, 
+  Play, Info, CheckCircle, AlertCircle, Loader2, XCircle 
+} from 'lucide-react';
 
 interface CampaignCompanionProps {
   onBack: () => void;
@@ -20,6 +22,161 @@ const ALLOWED_SHEET_TYPES = [
 ];
 const REQUEST_TIMEOUT_MS = 60_000; // 60 seconds
 
+// Embedded CSS styles
+const AppStyles = `
+  .cc-app-container {
+    min-height: 100vh;
+    background-color: #f8fafc;
+    padding: 40px 20px;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #0f172a;
+    box-sizing: border-box;
+  }
+  .cc-app-container * { box-sizing: border-box; }
+  .cc-content-wrapper { max-width: 800px; margin: 0 auto; }
+  
+  /* Back Button */
+  .cc-back-button {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: transparent; border: none; color: #64748b;
+    font-weight: 600; cursor: pointer; padding: 8px 12px;
+    border-radius: 8px; transition: all 0.2s; margin-bottom: 24px;
+  }
+  .cc-back-button:hover { background-color: #e2e8f0; color: #0f172a; }
+  
+  /* Header */
+  .cc-header { margin-bottom: 32px; }
+  .cc-header h1 {
+    font-size: 1.875rem; font-weight: 800; letter-spacing: -0.025em;
+    margin: 0 0 8px 0;
+  }
+  .cc-header p { font-size: 0.95rem; color: #64748b; margin: 0; line-height: 1.5; }
+  
+  /* Configuration Bar */
+  .cc-config-bar {
+    display: flex; flex-wrap: wrap; gap: 24px; margin-bottom: 24px;
+    background: #ffffff; padding: 16px 24px; border-radius: 12px;
+    border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+  }
+  .cc-config-group { display: flex; flex-direction: column; gap: 8px; }
+  .cc-config-label {
+    font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+    color: #64748b; letter-spacing: 0.05em;
+  }
+  .cc-segmented-control {
+    display: inline-flex; background-color: #f1f5f9; padding: 4px;
+    border-radius: 8px; gap: 4px;
+  }
+  .cc-segment {
+    display: flex; align-items: center; gap: 6px; background: transparent;
+    border: none; padding: 6px 16px; font-size: 0.85rem; font-weight: 600;
+    color: #64748b; border-radius: 6px; cursor: pointer; transition: all 0.2s;
+  }
+  .cc-segment.active {
+    background: #ffffff; color: #3b82f6;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+  .cc-segment:not(.active):hover { color: #0f172a; }
+  
+  /* Main Card */
+  .cc-main-card {
+    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;
+    box-shadow: 0 10px 15px -3px rgba(0,0,0,0.08); overflow: hidden;
+  }
+  .cc-tabs {
+    display: flex; border-bottom: 1px solid #e2e8f0; background-color: #f8fafc;
+  }
+  .cc-tab {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 16px; background: transparent; border: none; font-size: 0.95rem;
+    font-weight: 600; color: #64748b; cursor: pointer; transition: all 0.2s;
+    border-bottom: 2px solid transparent;
+  }
+  .cc-tab.active { color: #3b82f6; background: #ffffff; border-bottom-color: #3b82f6; }
+  .cc-tab:not(.active):hover { background-color: #e2e8f0; }
+  
+  /* Panel Content */
+  .cc-panel { padding: 32px; }
+  .cc-panel-content { display: flex; flex-direction: column; gap: 24px; }
+  .cc-panel-header h2 { margin: 0 0 8px 0; font-size: 1.25rem; font-weight: 700; }
+  .cc-panel-header p { margin: 0; color: #64748b; font-size: 0.9rem; line-height: 1.5; }
+  
+  /* Dropzone */
+  .cc-dropzone {
+    border: 2px dashed #cbd5e1; border-radius: 12px; padding: 40px 20px;
+    text-align: center; cursor: pointer; transition: all 0.2s; background-color: #f8fafc;
+  }
+  .cc-dropzone:hover { border-color: #3b82f6; background-color: #eff6ff; }
+  .cc-dropzone-icon { color: #64748b; margin-bottom: 12px; display: flex; justify-content: center; }
+  .cc-dropzone-title { font-weight: 700; font-size: 1rem; margin: 0 0 4px 0; color: #0f172a; }
+  .cc-dropzone-subtitle { font-size: 0.85rem; color: #64748b; margin: 0; }
+  .cc-hidden-input { display: none; }
+  
+  /* Previews & Chips */
+  .cc-preview-container { display: flex; flex-direction: column; gap: 8px; }
+  .cc-preview-label { font-size: 0.8rem; font-weight: 700; color: #64748b; margin: 0; }
+  .cc-preview-image {
+    max-width: 100%; max-height: 300px; border-radius: 8px;
+    border: 1px solid #e2e8f0; object-fit: contain;
+  }
+  .cc-file-chip {
+    display: inline-flex; align-items: center; gap: 8px; background: #eff6ff;
+    color: #3b82f6; padding: 8px 16px; border-radius: 20px; font-size: 0.85rem;
+    font-weight: 600; align-self: flex-start;
+  }
+  
+  /* Action Area */
+  .cc-action-area {
+    padding: 24px 32px; background: #f8fafc; border-top: 1px solid #e2e8f0;
+    display: flex; flex-direction: column; gap: 16px; align-items: stretch;
+  }
+  .cc-submit-btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+    padding: 14px 24px; background: #3b82f6; color: #ffffff; border: none;
+    border-radius: 8px; font-size: 1rem; font-weight: 700; cursor: pointer;
+    transition: background 0.2s;
+  }
+  .cc-submit-btn:hover:not(:disabled) { background: #2563eb; }
+  .cc-submit-btn:disabled { background: #94a3b8; cursor: not-allowed; }
+  
+  /* Status Messages */
+  .cc-status-message {
+    display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+    border-radius: 8px; font-size: 0.9rem; font-weight: 500;
+  }
+  .cc-status-message.info { background: #eff6ff; color: #6366f1; }
+  .cc-status-message.success { background: #ecfdf5; color: #10b981; }
+  .cc-status-message.error { background: #fef2f2; color: #ef4444; }
+  
+  /* Spin Animation */
+  .cc-spin { animation: cc-spin 1s linear infinite; }
+  @keyframes cc-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  
+  /* Guide Card */
+  .cc-guide-card {
+    margin-top: 32px; background: #ffffff; border: 1px solid #e2e8f0;
+    border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+  }
+  .cc-guide-card h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 24px 0; font-size: 1.1rem; }
+  .cc-guide-steps { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 768px) {
+    .cc-guide-steps { grid-template-columns: 1fr; }
+    .cc-config-bar { flex-direction: column; gap: 16px; }
+  }
+  .cc-step { display: flex; gap: 12px; }
+  .cc-step-num {
+    flex-shrink: 0; width: 24px; height: 24px; background: #3b82f6; color: #ffffff;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 0.8rem; font-weight: 700;
+  }
+  .cc-step-text h4 { margin: 0 0 4px 0; font-size: 0.95rem; }
+  .cc-step-text p { margin: 0; font-size: 0.85rem; color: #64748b; line-height: 1.4; }
+  .cc-step-text code {
+    background: #f1f5f9; padding: 2px 6px; border-radius: 4px;
+    font-size: 0.8rem; font-family: monospace;
+  }
+`;
+
 export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
   const [activeTab, setActiveTab] = useState<'ocr' | 'sanitize'>('ocr');
   const [channel, setChannel] = useState<'sms' | 'email' | 'call'>('sms');
@@ -34,11 +191,8 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
 
   const ocrInputRef = useRef<HTMLInputElement>(null);
   const sanitizeInputRef = useRef<HTMLInputElement>(null);
-
-  // AbortController for cancelling in‑flight requests
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Cleanup on unmount: abort any ongoing request
   useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
@@ -46,7 +200,6 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
   }, []);
 
   const switchTab = (tab: 'ocr' | 'sanitize') => {
-    // Cancel any in‑flight request when switching tabs
     abortControllerRef.current?.abort();
     setActiveTab(tab);
     setSelectedFile(null);
@@ -55,19 +208,15 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
     setStatus({ message: '', type: '' });
   };
 
-  // ---------- Image selection with validation ----------
   const handleImageSelection = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate type
     if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
       setStatus({ message: 'Invalid file type. Please upload a JPG, PNG, or WebP image.', type: 'error' });
-      // Clear the input so the same invalid file can be re‑selected
       e.target.value = '';
       return;
     }
-    // Validate size
     if (file.size > MAX_IMAGE_SIZE) {
       setStatus({ message: 'Image is too large. Maximum size is 5 MB.', type: 'error' });
       e.target.value = '';
@@ -76,23 +225,21 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
 
     const reader = new FileReader();
     reader.onload = (event) => {
-  const result = event.target?.result as string;
-  setImagePreview(result);
-  setImageBase64(result);  // <-- store full data URI, not just the base64 part
-  setStatus({ message: 'Image loaded. Ready to run Workers AI OCR.', type: 'info' });
-};
+      const result = event.target?.result as string;
+      setImagePreview(result);
+      setImageBase64(result);
+      setStatus({ message: 'Image loaded successfully. Ready to process.', type: 'info' });
+    };
     reader.onerror = () => {
       setStatus({ message: 'Failed to read the image file.', type: 'error' });
     };
     reader.readAsDataURL(file);
   };
 
-  // ---------- Spreadsheet selection with validation ----------
   const handleSheetSelection = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate type (by extension or MIME)
     const isValid = ALLOWED_SHEET_TYPES.includes(file.type) ||
       file.name.endsWith('.csv') ||
       file.name.endsWith('.xls') ||
@@ -110,10 +257,9 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
     }
 
     setSelectedFile(file);
-    setStatus({ message: `Loaded ${file.name}. Ready to normalize roster properties.`, type: 'info' });
+    setStatus({ message: `${file.name} loaded. Ready to normalize.`, type: 'info' });
   };
 
-  // ---------- Download helper ----------
   const triggerLocalDownload = (data: any[]) => {
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
@@ -128,20 +274,14 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
     }
   };
 
-  // ---------- Main processing pipeline ----------
   const executeProcessorPipeline = async () => {
-    // Abort previous request if any
     abortControllerRef.current?.abort();
-
-    // Create a new AbortController for this request
     const controller = new AbortController();
     abortControllerRef.current = controller;
-
-    // Set a timeout that aborts after REQUEST_TIMEOUT_MS
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     setIsProcessing(true);
-    setStatus({ message: 'Hono Backend is communicating with Workers AI...', type: 'info' });
+    setStatus({ message: 'Processing data via Cloudflare Workers AI...', type: 'info' });
 
     try {
       let parsedResultJson: any[] = [];
@@ -157,7 +297,7 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
             channel,
             image: imageBase64
           }),
-          signal: controller.signal,   // <-- abort if tab changes or timeout
+          signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -199,10 +339,9 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
       }
 
       triggerLocalDownload(parsedResultJson);
-      setStatus({ message: `Success! Worker processed ${parsedResultJson.length} records.`, type: 'success' });
+      setStatus({ message: `Success! Processed ${parsedResultJson.length} records.`, type: 'success' });
 
     } catch (error: any) {
-      // Ignore errors caused by intentional abort
       if (error.name === 'AbortError') {
         setStatus({ message: 'Request was cancelled.', type: 'info' });
       } else {
@@ -212,7 +351,6 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
     } finally {
       clearTimeout(timeoutId);
       setIsProcessing(false);
-      // Clean up the controller ref if it's still this one
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
@@ -221,142 +359,166 @@ export default function CampaignCompanion({ onBack }: CampaignCompanionProps) {
 
   const isSubmitDisabled = isProcessing || (activeTab === 'ocr' && !imageBase64) || (activeTab === 'sanitize' && !selectedFile);
 
-  // ---------- JSX unchanged except for adding key to channel buttons ----------
+  const StatusIcon = () => {
+    if (isProcessing) return <Loader2 className="cc-spin" size={18} />;
+    if (status.type === 'success') return <CheckCircle size={18} />;
+    if (status.type === 'error') return <XCircle size={18} />;
+    return <Info size={18} />;
+  };
+
   return (
-    <div className="campaign-body">
-      <div className="container">
-        <div onClick={onBack} className="back-link" style={{ cursor: 'pointer', display: 'inline-flex' }}>
-          <ArrowLeft size={18} /> Return to Local Call Center
-        </div>
+    <div className="cc-app-container">
+      <style>{AppStyles}</style>
+      
+      <div className="cc-content-wrapper">
+        <button onClick={onBack} className="cc-back-button">
+          <ArrowLeft size={18} /> Return to Call Center
+        </button>
 
-        <div className="header">
+        <header className="cc-header">
           <h1>Campaign Data Companion</h1>
-          <p>Convert handwriting photos or format problematic rosters using Workers AI bound natively inside Hono</p>
-        </div>
+          <p>Convert handwritten images or format unstructured spreadsheets into clean, actionable data using Cloudflare Workers AI.</p>
+        </header>
 
-        <div className="channel-select-group" style={{ marginBottom: '20px' }}>
-          <p style={{ fontWeight: 700, marginBottom: '8px', fontSize: '0.9rem' }}>Campaign Mode:</p>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            {['sms', 'email', 'call'].map((mode) => (
-              <button
-                key={mode}
-                className={`tab-btn ${channel === mode ? 'active' : ''}`}
-                onClick={() => setChannel(mode as any)}
-                style={{ padding: '8px 16px', textTransform: 'uppercase', fontSize: '0.8rem' }}
+        {/* Configuration Section */}
+        <div className="cc-config-bar">
+          <div className="cc-config-group">
+            <label className="cc-config-label">Campaign Type</label>
+            <div className="cc-segmented-control">
+              {(['sms', 'email', 'call'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  className={`cc-segment ${channel === mode ? 'active' : ''}`}
+                  onClick={() => setChannel(mode)}
+                >
+                  {mode.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="cc-config-group">
+            <label className="cc-config-label">Output Format</label>
+            <div className="cc-segmented-control">
+              <button 
+                className={`cc-segment ${outputFormat === 'xlsx' ? 'active' : ''}`}
+                onClick={() => setOutputFormat('xlsx')}
               >
-                {mode} Mode
+                <FileSpreadsheet size={16} /> Excel
               </button>
-            ))}
+              <button 
+                className={`cc-segment ${outputFormat === 'csv' ? 'active' : ''}`}
+                onClick={() => setOutputFormat('csv')}
+              >
+                <FileText size={16} /> CSV
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="tabs">
-          <button
-            className={`tab-btn ${activeTab === 'ocr' ? 'active' : ''}`}
-            onClick={() => switchTab('ocr')}
-          >
-            <Camera size={18} /> Vision OCR (Llama 3.2)
-          </button>
-          <button
-            className={`tab-btn ${activeTab === 'sanitize' ? 'active' : ''}`}
-            onClick={() => switchTab('sanitize')}
-          >
-            <Sparkles size={18} /> Auto-Sanitize (Llama 3.1)
-          </button>
-        </div>
+        {/* Main Action Card */}
+        <div className="cc-main-card">
+          <div className="cc-tabs">
+            <button
+              className={`cc-tab ${activeTab === 'ocr' ? 'active' : ''}`}
+              onClick={() => switchTab('ocr')}
+            >
+              <Camera size={20} /> Vision OCR Extractor
+            </button>
+            <button
+              className={`cc-tab ${activeTab === 'sanitize' ? 'active' : ''}`}
+              onClick={() => switchTab('sanitize')}
+            >
+              <Sparkles size={20} /> Smart Spreadsheet Sanitizer
+            </button>
+          </div>
 
-        <div className="card">
-          {activeTab === 'ocr' && (
-            <div id="panel-ocr">
-              <h2>Handwritten List Extractor</h2>
-              <p className="description">Snap a sharp photo of pen-and-paper sign-up lists. Cloudflare's Edge Vision model will isolate text characters and normalize the fields.</p>
-
-              <div className="dropzone" onClick={() => ocrInputRef.current?.click()}>
-                <input type="file" ref={ocrInputRef} accept="image/*" onChange={handleImageSelection} />
-                <div className="dropzone-icon"><Camera size={24} /></div>
-                <p style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '4px' }}>Capture Photo or Select Image</p>
-                <p style={{ fontSize: '0.85rem', color: 'var(--neutral-600)' }}>Supports JPG, PNG processed securely via edge AI</p>
-              </div>
-
-              {imagePreview && (
-                <div className="preview-container" style={{ display: 'block' }}>
-                  <p style={{ fontSize: '0.8rem', marginBottom: '8px', fontWeight: 700, color: 'var(--neutral-700)' }}>Selected Roster Image Preview:</p>
-                  <img className="preview-image" src={imagePreview} alt="Upload preview" />
+          <div className="cc-panel">
+            {activeTab === 'ocr' ? (
+              <div className="cc-panel-content">
+                <div className="cc-panel-header">
+                  <h2>Handwritten List Extractor</h2>
+                  <p>Snap a sharp photo of pen-and-paper sign-up lists. The Edge Vision model will isolate text and normalize fields.</p>
                 </div>
-              )}
-            </div>
-          )}
+                <div className="cc-dropzone" onClick={() => ocrInputRef.current?.click()}>
+                  <input type="file" ref={ocrInputRef} accept="image/*" onChange={handleImageSelection} className="cc-hidden-input" />
+                  <div className="cc-dropzone-icon"><Camera size={32} /></div>
+                  <p className="cc-dropzone-title">Capture Photo or Select Image</p>
+                  <p className="cc-dropzone-subtitle">Supports JPG, PNG up to 5MB</p>
+                </div>
 
-          {activeTab === 'sanitize' && (
-            <div id="panel-sanitize">
-              <h2>Roster Normalization Helper</h2>
-              <p className="description">Upload problematic, broken, or weirdly formatted CSV/XLSX lists. Llama 3.1 will dynamically scan, structure, and output standard names and clean contacts.</p>
-
-              <div className="dropzone" onClick={() => sanitizeInputRef.current?.click()}>
-                <input type="file" ref={sanitizeInputRef} accept=".csv,.xlsx,.xls" onChange={handleSheetSelection} />
-                <div className="dropzone-icon"><FileSpreadsheet size={24} /></div>
-                <p style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '4px' }}>Select Dirty Spreadsheet</p>
-                <p style={{ fontSize: '0.85rem', color: 'var(--neutral-600)' }}>Supports CSV, XLSX up to 10MB</p>
+                {imagePreview && (
+                  <div className="cc-preview-container">
+                    <p className="cc-preview-label">Image Preview:</p>
+                    <img className="cc-preview-image" src={imagePreview} alt="Upload preview" />
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="cc-panel-content">
+                <div className="cc-panel-header">
+                  <h2>Roster Normalization Helper</h2>
+                  <p>Upload problematic, broken, or weirdly formatted CSV/XLSX lists. AI will scan, structure, and output clean contacts.</p>
+                </div>
+                <div className="cc-dropzone" onClick={() => sanitizeInputRef.current?.click()}>
+                  <input type="file" ref={sanitizeInputRef} accept=".csv,.xlsx,.xls" onChange={handleSheetSelection} className="cc-hidden-input" />
+                  <div className="cc-dropzone-icon"><FileSpreadsheet size={32} /></div>
+                  <p className="cc-dropzone-title">Select Unstructured Spreadsheet</p>
+                  <p className="cc-dropzone-subtitle">Supports CSV, XLSX up to 10MB</p>
+                </div>
 
-          <div className="options-group">
-            <p className="options-title">Select Download Output File Format:</p>
-            <div className="format-selector">
-              <label className="format-label">
-                <input
-                  type="radio"
-                  name="output-format"
-                  value="xlsx"
-                  checked={outputFormat === 'xlsx'}
-                  onChange={() => setOutputFormat('xlsx')}
-                />
-                <FileSpreadsheet size={18} style={{ color: 'var(--success)' }} /> Microsoft Excel (.xlsx)
-              </label>
-              <label className="format-label">
-                <input
-                  type="radio"
-                  name="output-format"
-                  value="csv"
-                  checked={outputFormat === 'csv'}
-                  onChange={() => setOutputFormat('csv')}
-                />
-                <FileText size={18} style={{ color: 'var(--primary)' }} /> Plain CSV (.csv)
-              </label>
-            </div>
+                {selectedFile && (
+                  <div className="cc-file-chip">
+                    <FileSpreadsheet size={16} />
+                    <span>{selectedFile.name}</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          <button
-            className="btn"
-            disabled={isSubmitDisabled}
-            onClick={executeProcessorPipeline}
-          >
-            <Play size={18} /> {isProcessing ? 'Processing in Worker...' : 'Extract & Download Clean File'}
-          </button>
+          <div className="cc-action-area">
+            <button
+              className="cc-submit-btn"
+              disabled={isSubmitDisabled}
+              onClick={executeProcessorPipeline}
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="cc-spin" size={20} /> Processing via Worker...
+                </>
+              ) : (
+                <>
+                  <Play size={20} /> Extract & Download Clean File
+                </>
+              )}
+            </button>
 
-          {status.message && (
-            <div className={`status-message ${status.type}`} style={{ display: 'flex' }}>
-              {status.message}
-            </div>
-          )}
+            {status.message && (
+              <div className={`cc-status-message ${status.type}`}>
+                <StatusIcon />
+                <span>{status.message}</span>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="guide-box">
-          <h3><Info size={20} /> Quick Integration Guide</h3>
-          <div className="guide-steps">
-            <div className="step">
-              <div className="step-num">1</div>
-              <div className="step-text">
-                <h4>Hono & Edge Harmony</h4>
-                <p>This page sends the workload to the native <code>/api/companion</code> route. No extra domain setup required.</p>
+        {/* Guide Section */}
+        <div className="cc-guide-card">
+          <h3><Info size={20} /> How it works</h3>
+          <div className="cc-guide-steps">
+            <div className="cc-step">
+              <div className="cc-step-num">1</div>
+              <div className="cc-step-text">
+                <h4>Local Edge Processing</h4>
+                <p>Data is sent to the native <code>/api/companion</code> route. No external domains or third-party APIs are called.</p>
               </div>
             </div>
-            <div className="step">
-              <div className="step-num">2</div>
-              <div className="step-text">
-                <h4>Download Clean Roster</h4>
-                <p>Choose standard .xlsx or .csv output formats. Tapping execute saves a clean copy locally to your machine.</p>
+            <div className="cc-step">
+              <div className="cc-step-num">2</div>
+              <div className="cc-step-text">
+                <h4>Instant Local Export</h4>
+                <p>Once the Worker returns structured JSON, the browser instantly compiles and downloads your requested format.</p>
               </div>
             </div>
           </div>
