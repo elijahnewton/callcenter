@@ -11,8 +11,7 @@ import { TrackingPanel } from './components/TrackingPanel';
 import { SideMenu } from './components/SideMenu';
 import { ReportPage } from './components/ReportPage';
 
-const DEFAULT_SCRIPT =
-  'Hello [Name], my name is [CallerName] calling from "[BranchName]". I am calling to know how you\'re doing and to invite you for service.';
+const DEFAULT_SCRIPT = 'Hello [Name], my name is [CallerName] calling from "[BranchName]". I am calling to know how you\'re doing and to invite you for service.';
 
 type AlertType = 'success' | 'error' | 'info';
 
@@ -20,7 +19,6 @@ declare global {
   interface WindowEventMap {
     beforeinstallprompt: BeforeInstallPromptEvent;
   }
-
   interface BeforeInstallPromptEvent extends Event {
     prompt: () => Promise<void>;
     userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
@@ -44,17 +42,13 @@ export default function App() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [alert, setAlert] = useState<{ message: string; type: AlertType } | null>(null);
-
   const [showMenu, setShowMenu] = useState(false);
   const [showReport, setShowReport] = useState(false);
 
   const hydratedRef = useRef(false);
 
   useEffect(() => {
-    if (hydratedRef.current || sessionEntries === undefined) {
-      return;
-    }
-
+    if (hydratedRef.current || sessionEntries === undefined) return;
     setCurrentIndex(getSessionValue<number>(sessionEntries, 'currentIndex', 0));
     setScript(getSessionValue<string>(sessionEntries, 'script', DEFAULT_SCRIPT));
     setCallerName(getSessionValue<string>(sessionEntries, 'callerName', ''));
@@ -64,10 +58,7 @@ export default function App() {
   }, [sessionEntries]);
 
   useEffect(() => {
-    if (!hydratedRef.current) {
-      return;
-    }
-
+    if (!hydratedRef.current) return;
     void db.session.bulkPut([
       { key: 'currentIndex', value: currentIndex },
       { key: 'script', value: script },
@@ -83,18 +74,13 @@ export default function App() {
       setInstallPrompt(event);
       setShowInstallBanner(true);
     };
-
     window.addEventListener('beforeinstallprompt', beforeInstallHandler);
     return () => window.removeEventListener('beforeinstallprompt', beforeInstallHandler);
   }, []);
 
   useEffect(() => {
-    if (!records || records.length === 0) {
-      return;
-    }
-    if (currentIndex >= records.length) {
-      setCurrentIndex(records.length - 1);
-    }
+    if (!records || records.length === 0) return;
+    if (currentIndex >= records.length) setCurrentIndex(records.length - 1);
   }, [currentIndex, records]);
 
   const activeRecords = records ?? [];
@@ -111,11 +97,7 @@ export default function App() {
   };
 
   const handleSetup = () => {
-    if (!callerName.trim() || !branchName.trim()) {
-      showAlert('Please fill in all fields.', 'error');
-      return;
-    }
-
+    if (!callerName.trim() || !branchName.trim()) { showAlert('Please fill in all fields.', 'error'); return; }
     setCallerName(callerName.trim());
     setBranchName(branchName.trim());
     setSetupComplete(true);
@@ -123,26 +105,15 @@ export default function App() {
   };
 
   const handleChangeUser = async () => {
-    setCallerName('');
-    setBranchName('');
-    setSetupComplete(false);
-    await db.session.bulkPut([
-      { key: 'callerName', value: '' },
-      { key: 'branchName', value: '' },
-      { key: 'setupComplete', value: false },
-    ]);
+    setCallerName(''); setBranchName(''); setSetupComplete(false);
+    await db.session.bulkPut([{ key: 'callerName', value: '' }, { key: 'branchName', value: '' }, { key: 'setupComplete', value: false }]);
   };
 
   const handleInstall = async () => {
-    if (!installPrompt) {
-      return;
-    }
+    if (!installPrompt) return;
     await installPrompt.prompt();
     const choiceResult = await installPrompt.userChoice;
-    if (choiceResult.outcome === 'accepted') {
-      setInstallPrompt(null);
-      setShowInstallBanner(false);
-    }
+    if (choiceResult.outcome === 'accepted') { setInstallPrompt(null); setShowInstallBanner(false); }
   };
 
   const updateRecord = async (field: 'status' | 'customResponse' | 'notes', value: string) => {
@@ -150,116 +121,50 @@ export default function App() {
     await db.records.update(currentRecord.id, { [field]: value });
   };
 
-  // New handler for updating name and phone
+  // --- NEW: EDIT CONTACT HANDLER ---
   const handleUpdateContact = async (name: string, phone: string) => {
     if (!currentRecord) return;
     await db.records.update(currentRecord.id, { name, phone });
     showAlert('Contact details updated.', 'success');
   };
 
-  const goNext = () => {
-    if (currentIndex < activeRecords.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
-    }
-  };
-
-  const goPrevious = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex((prev) => prev - 1);
-    }
-  };
+  const goNext = () => { if (currentIndex < activeRecords.length - 1) setCurrentIndex((prev) => prev + 1); };
+  const goPrevious = () => { if (currentIndex > 0) setCurrentIndex((prev) => prev - 1); };
 
   const exportData = async () => {
     const dbRecords = await db.records.toArray();
-    if (dbRecords.length === 0) {
-      showAlert('No records to export.', 'error');
-      return;
-    }
-
-    const statusLabels: Record<string, string> = {
-      yes: 'Yes',
-      no: 'No',
-      notpicking: 'Not Picking',
-      phoneoff: 'Phone Off',
-      changedaddr: 'Changed Address',
-      other: 'Other',
-    };
-
-    const exportRecords = dbRecords.map((record) => ({
-      Name: record.name,
-      Phone: record.phone,
-      Status: statusLabels[record.status] || record.status || 'Not Called',
-      'Custom Response': record.status === 'other' ? record.customResponse : '',
-      Notes: record.notes,
-    }));
-
+    if (dbRecords.length === 0) { showAlert('No records to export.', 'error'); return; }
+    const statusLabels: Record<string, string> = { yes: 'Yes', no: 'No', notpicking: 'Not Picking', phoneoff: 'Phone Off', changedaddr: 'Changed Address', other: 'Other' };
+    const exportRecords = dbRecords.map((record) => ({ Name: record.name, Phone: record.phone, Status: statusLabels[record.status] || record.status || 'Not Called', 'Custom Response': record.status === 'other' ? record.customResponse : '', Notes: record.notes }));
     const worksheet = XLSX.utils.json_to_sheet(exportRecords);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Campaign Results');
-
-    worksheet['!cols'] = [
-      { wch: 25 },
-      { wch: 18 },
-      { wch: 15 },
-      { wch: 30 },
-      { wch: 50 },
-    ];
-
-    const timestamp = new Date().toISOString().split('T')[0];
-    XLSX.writeFile(workbook, `campaign-report-${timestamp}.xlsx`);
+    worksheet['!cols'] = [{ wch: 25 }, { wch: 18 }, { wch: 15 }, { wch: 30 }, { wch: 50 }];
+    XLSX.writeFile(workbook, `campaign-report-${new Date().toISOString().split('T')[0]}.xlsx`);
     showAlert('Report downloaded successfully.', 'success');
   };
 
   const handleRecordsParsed = async (parsedRecords: CampaignRecord[]) => {
     await db.transaction('rw', db.records, db.session, async () => {
       const maxId = await db.records.orderBy('id').last().then((r) => r?.id ?? 0);
-
-      const newRecords = parsedRecords.map((r, i) => ({
-        ...r,
-        id: maxId + i + 1,
-        congregantId: maxId + i + 1,
-      }));
-
+      const newRecords = parsedRecords.map((r, i) => ({ ...r, id: maxId + i + 1, congregantId: maxId + i + 1 }));
       await db.records.bulkAdd(newRecords);
-
       const newIndex = maxId === 0 ? 0 : maxId;
       setCurrentIndex(newIndex);
       await db.session.put({ key: 'currentIndex', value: newIndex });
     });
-
     showAlert(`Appended ${parsedRecords.length} records to list.`, 'success');
   };
 
-  const handleComplete = () => {
-    setShowReport(true);
-  };
+  const handleSelectContact = (index: number) => { setCurrentIndex(index); setShowMenu(false); if (showReport) setShowReport(false); };
+  const handleClearMemory = async () => { await db.records.clear(); setCurrentIndex(0); await db.session.put({ key: 'currentIndex', value: 0 }); setShowMenu(false); setShowReport(false); showAlert('Memory cleared.', 'info'); };
 
-  const handleSelectContact = (index: number) => {
-    setCurrentIndex(index);
-    setShowMenu(false);
-    if (showReport) {
-      setShowReport(false);
-    }
-  };
+  if (!setupComplete) return <SetupScreen callerName={callerName} branchName={branchName} onCallerNameChange={setCallerName} onBranchNameChange={setBranchName} onSubmit={handleSetup} />;
 
-  const handleClearMemory = async () => {
-    await db.records.clear();
-    setCurrentIndex(0);
-    await db.session.put({ key: 'currentIndex', value: 0 });
-    setShowMenu(false);
-    setShowReport(false);
-    showAlert('Memory cleared. You can upload a new list.', 'info');
-  };
-
-  // Branded header component
   const AppHeader = () => (
     <header className="header">
       <div className="container" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <button
-          className="hamburger-btn header-hamburger"
-          onClick={() => setShowMenu(true)}
-          style={{ position: 'relative', borderColor: 'var(--neutral-200)', color: 'var(--neutral-400)' }}
-        >
+        <button className="hamburger-btn header-hamburger" onClick={() => setShowMenu(true)} style={{ position: 'relative' }}>
           <Menu size={20} />
           {activeRecords.length > 0 && <span className="menu-badge">{activeRecords.length}</span>}
         </button>
@@ -271,39 +176,15 @@ export default function App() {
     </header>
   );
 
-  if (!setupComplete) {
-    return (
-      <SetupScreen
-        callerName={callerName}
-        branchName={branchName}
-        onCallerNameChange={setCallerName}
-        onBranchNameChange={setBranchName}
-        onSubmit={handleSetup}
-      />
-    );
-  }
-
   if (showReport) {
     return (
       <>
         <AppHeader />
         <div className="container">
           {alert && <div className={`alert ${alert.type}`}>{alert.message}</div>}
-          <ReportPage
-            records={activeRecords}
-            onBack={() => setShowReport(false)}
-            onDownloadReport={exportData}
-          />
+          <ReportPage records={activeRecords} onBack={() => setShowReport(false)} onDownloadReport={exportData} />
         </div>
-        <SideMenu
-          isOpen={showMenu}
-          onClose={() => setShowMenu(false)}
-          records={activeRecords}
-          onSelectContact={handleSelectContact}
-          onClearMemory={handleClearMemory}
-          onShowReport={() => setShowMenu(false)}
-          currentRecordIndex={currentIndex}
-        />
+        <SideMenu isOpen={showMenu} onClose={() => setShowMenu(false)} records={activeRecords} onSelectContact={handleSelectContact} onClearMemory={handleClearMemory} onShowReport={() => setShowMenu(false)} currentRecordIndex={currentIndex} />
       </>
     );
   }
@@ -311,39 +192,18 @@ export default function App() {
   return (
     <div>
       <AppHeader />
-
       <div className="container">
         {showInstallBanner && (
-          <div
-            className="install-banner"
-            style={{
-              background: 'linear-gradient(135deg, #0a0a0a 0%, #171717 100%)',
-              border: '1px solid var(--neutral-200)',
-            }}
-          >
-            <p style={{ color: 'var(--neutral-500)' }}>
-              <Smartphone size={18} /> Install this app for fully offline calling sessions.
-            </p>
-            <button
-              type="button"
-              className="install-btn"
-              style={{ background: 'var(--primary)', color: '#000' }}
-              onClick={handleInstall}
-            >
-              Install App
-            </button>
+          <div className="install-banner" style={{ background: 'var(--bg-card)', border: '1px solid var(--primary)' }}>
+            <p style={{ color: 'var(--neutral-400)' }}><Smartphone size={18} /> Install this app for fully offline calling sessions.</p>
+            <button type="button" className="install-btn" style={{ background: 'var(--primary)', color: '#000' }} onClick={handleInstall}>Install App</button>
           </div>
         )}
-
         {alert && <div className={`alert ${alert.type}`}>{alert.message}</div>}
-
         <div className="user-info">
-          <strong>Caller:</strong> {callerName}
-          <br />
+          <strong>Caller:</strong> {callerName}<br />
           <strong>Branch:</strong> {branchName}
-          <button type="button" className="change-user-btn" onClick={handleChangeUser}>
-            Change
-          </button>
+          <button type="button" className="change-user-btn" onClick={handleChangeUser}>Change</button>
         </div>
 
         {activeRecords.length === 0 ? (
@@ -351,17 +211,9 @@ export default function App() {
         ) : (
           <>
             <div className="progress-container">
-              <div className="progress-info">
-                <span>
-                  Contact {currentIndex + 1} of {activeRecords.length}
-                </span>
-                <span>{Math.round(progress)}% Complete</span>
-              </div>
-              <div className="progress-bar">
-                <div className="progress-fill" style={{ width: `${progress}%` }} />
-              </div>
+              <div className="progress-info"><span>Contact {currentIndex + 1} of {activeRecords.length}</span><span>{Math.round(progress)}% Complete</span></div>
+              <div className="progress-bar"><div className="progress-fill" style={{ width: `${progress}%` }} /></div>
             </div>
-
             {currentRecord && (
               <div className="main-layout">
                 <Teleprompter
@@ -369,43 +221,19 @@ export default function App() {
                   currentRecord={currentRecord}
                   callerName={callerName}
                   branchName={branchName}
-                  onUpdateContact={handleUpdateContact} // Pass new prop
+                  onUpdateContact={handleUpdateContact} 
                 />
-                <TrackingPanel
-                  record={currentRecord}
-                  currentIndex={currentIndex}
-                  totalRecords={activeRecords.length}
-                  onUpdateRecord={updateRecord}
-                  onPrevious={goPrevious}
-                  onNext={goNext}
-                  onComplete={handleComplete}
-                  onDownloadReport={exportData}
-                />
+                <TrackingPanel record={currentRecord} currentIndex={currentIndex} totalRecords={activeRecords.length} onUpdateRecord={updateRecord} onPrevious={goPrevious} onNext={goNext} onComplete={() => setShowReport(true)} onDownloadReport={exportData} />
               </div>
             )}
-
             <details className="load-more-section">
               <summary>+ Load another list (appends to current contacts)</summary>
-              <div style={{ marginTop: '0.75rem' }}>
-                <UploadZone onRecordsParsed={handleRecordsParsed} onAlert={showAlert} />
-              </div>
+              <div style={{ marginTop: '0.75rem' }}><UploadZone onRecordsParsed={handleRecordsParsed} onAlert={showAlert} /></div>
             </details>
           </>
         )}
       </div>
-
-      <SideMenu
-        isOpen={showMenu}
-        onClose={() => setShowMenu(false)}
-        records={activeRecords}
-        onSelectContact={handleSelectContact}
-        onClearMemory={handleClearMemory}
-        onShowReport={() => {
-          setShowMenu(false);
-          if (activeRecords.length > 0) setShowReport(true);
-        }}
-        currentRecordIndex={currentIndex}
-      />
+      <SideMenu isOpen={showMenu} onClose={() => setShowMenu(false)} records={activeRecords} onSelectContact={handleSelectContact} onClearMemory={handleClearMemory} onShowReport={() => { setShowMenu(false); if (activeRecords.length > 0) setShowReport(true); }} currentRecordIndex={currentIndex} />
     </div>
   );
 }
