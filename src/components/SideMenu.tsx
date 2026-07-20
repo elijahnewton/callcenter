@@ -26,8 +26,9 @@ export function SideMenu({
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
-  const calledRecords = records.filter((r) => r.status && r.status !== '');
-  const notCalledRecords = records.filter((r) => !r.status || r.status === '');
+  // Fixed TS2367: checking truthiness instead of comparing to ''
+  const calledRecords = records.filter((r) => !!r.status);
+  const notCalledRecords = records.filter((r) => !r.status);
 
   const getFilteredRecords = (): Array<{ record: CampaignRecord; originalIndex: number }> => {
     switch (activeTab) {
@@ -86,16 +87,13 @@ export function SideMenu({
 
   return (
     <>
-      {/* Backdrop */}
       <div
         className={`menu-backdrop ${isOpen ? 'open' : ''}`}
         onClick={onClose}
         aria-hidden="true"
       />
 
-      {/* Menu Panel */}
       <aside className={`side-menu ${isOpen ? 'open' : ''}`} role="dialog" aria-label="Contacts menu">
-        {/* Header */}
         <div className="menu-header">
           <h2>Contacts</h2>
           <button className="menu-close-btn" onClick={onClose} aria-label="Close menu">
@@ -103,7 +101,6 @@ export function SideMenu({
           </button>
         </div>
 
-        {/* Stats Summary */}
         <div className="menu-stats">
           <div className="menu-stat-item">
             <span className="stat-number">{records.length}</span>
@@ -119,7 +116,6 @@ export function SideMenu({
           </div>
         </div>
 
-        {/* Filter Tabs */}
         <div className="menu-tabs">
           <button
             className={`menu-tab ${activeTab === 'all' ? 'active' : ''}`}
@@ -143,7 +139,6 @@ export function SideMenu({
           </button>
         </div>
 
-        {/* Contact List */}
         <div className="menu-contact-list">
           {filteredRecords.length === 0 ? (
             <div className="menu-empty">
@@ -187,7 +182,6 @@ export function SideMenu({
           )}
         </div>
 
-        {/* Footer Actions */}
         <div className="menu-footer">
           <button className="menu-footer-btn report-btn" onClick={onShowReport}>
             <BarChart3 size={16} />
