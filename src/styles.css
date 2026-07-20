@@ -124,7 +124,15 @@ body, #root {
 }
 .install-btn:hover { background: var(--primary-dark); }
 
-/* ============================================
+/*
+
+.setup-btn {
+  background: var(--primary); color: #fff; border: none; padding: 0.6rem 1.25rem;
+  border-radius: 8px; font-weight: 700; cursor: pointer; white-space: nowrap;
+  box-shadow: 0 2px 4px rgba(249, 115, 22, 0.3);
+}
+.setup-btn:hover { background: var(--primary-dark); }
+ ============================================
    FORMS & INPUTS
    ============================================ */
 .form-group input, .status-dropdown, .custom-response input, .notes-area textarea, .contact-edit-input {
