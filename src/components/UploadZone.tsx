@@ -1,6 +1,6 @@
 import { useRef, type DragEvent } from 'react';
 import * as XLSX from 'xlsx';
-import { FileSpreadsheet, Upload, CheckCircle2, ShieldAlert, PhoneCall, Save, Search } from 'lucide-react';
+import { FileSpreadsheet, Upload, CheckCircle2, ShieldAlert, PhoneCall, Search } from 'lucide-react';
 import type { CampaignRecord, CallStatus } from '../types';
 
 interface UploadZoneProps {
@@ -64,7 +64,7 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
       if (rawData.length === 0) { onAlert('No data found in the uploaded file.', 'error'); return; }
       const headerResult = findHeaders(rawData);
       if (!headerResult) { onAlert(`Could not detect name and phone columns in the first ${HEADER_SCAN_ROWS} rows.`, 'error'); return; }
-      const { nameColIndex, phoneColIndex, dataStartRow, headerRowFound } = headerResult;
+      const { nameColIndex, phoneColIndex, dataStartRow } = headerResult;
       const availableDataRows = rawData.length - dataStartRow;
       if (availableDataRows <= 0) { onAlert('Found headers but no data rows below them.', 'error'); return; }
       if (availableDataRows > MAX_ROWS) { onAlert(`File too large (${availableDataRows} rows). Max is ${MAX_ROWS}.`, 'error'); return; }
