@@ -31,12 +31,12 @@ export function Teleprompter({ script, currentRecord, callerName, branchName, on
   const [editName, setEditName] = useState(currentRecord.name);
   const [editPhone, setEditPhone] = useState(currentRecord.phone);
 
-  // Sync state if the user navigates to a different record while editing
+  // Sync state if the user navigates to a different record
   useEffect(() => {
     setEditName(currentRecord.name);
     setEditPhone(currentRecord.phone);
     setIsEditing(false);
-  }, [currentRecord.id]);
+  }, [currentRecord.id, currentRecord.name, currentRecord.phone]);
 
   const scriptNodes = tokenizeScript(script, {
     '[Name]': currentRecord.name || 'Friend',
@@ -62,6 +62,7 @@ export function Teleprompter({ script, currentRecord, callerName, branchName, on
               placeholder="Contact Name"
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
+              autoFocus
             />
             <input
               type="tel"
@@ -72,7 +73,7 @@ export function Teleprompter({ script, currentRecord, callerName, branchName, on
             />
             <div className="contact-edit-actions">
               <button type="button" className="btn-edit-save" onClick={handleSave}>
-                Save
+                Save Details
               </button>
               <button type="button" className="btn-edit-cancel" onClick={() => setIsEditing(false)}>
                 Cancel
@@ -82,13 +83,13 @@ export function Teleprompter({ script, currentRecord, callerName, branchName, on
         ) : (
           <>
             <p><strong>{currentRecord.name || 'Unknown Contact'}</strong></p>
-            <p className="text-muted">{currentRecord.phone || 'No phone number'}</p>
+            <p style={{ color: 'var(--neutral-400)' }}>{currentRecord.phone || 'No phone number'}</p>
             <button 
               type="button" 
               className="btn-edit-trigger" 
               onClick={() => setIsEditing(true)}
             >
-              <Pencil size={10} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
+              <Pencil size={10} />
               Edit Name / Number
             </button>
           </>
