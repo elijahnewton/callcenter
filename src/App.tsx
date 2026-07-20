@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import * as XLSX from 'xlsx';
-import { Smartphone, Menu } from 'lucide-react'; // Removed Download here
+import { Smartphone, Menu } from 'lucide-react';
 import { db } from './db/database';
 import type { CampaignRecord } from './types';
 import { SetupScreen } from './components/SetupScreen';
@@ -44,7 +44,7 @@ export default function App() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [alert, setAlert] = useState<{ message: string; type: AlertType } | null>(null);
-  
+
   const [showMenu, setShowMenu] = useState(false);
   const [showReport, setShowReport] = useState(false);
 
@@ -150,6 +150,13 @@ export default function App() {
     await db.records.update(currentRecord.id, { [field]: value });
   };
 
+  // New handler for updating name and phone
+  const handleUpdateContact = async (name: string, phone: string) => {
+    if (!currentRecord) return;
+    await db.records.update(currentRecord.id, { name, phone });
+    showAlert('Contact details updated.', 'success');
+  };
+
   const goNext = () => {
     if (currentIndex < activeRecords.length - 1) {
       setCurrentIndex((prev) => prev + 1);
@@ -206,20 +213,20 @@ export default function App() {
   const handleRecordsParsed = async (parsedRecords: CampaignRecord[]) => {
     await db.transaction('rw', db.records, db.session, async () => {
       const maxId = await db.records.orderBy('id').last().then((r) => r?.id ?? 0);
-      
+
       const newRecords = parsedRecords.map((r, i) => ({
         ...r,
         id: maxId + i + 1,
         congregantId: maxId + i + 1,
       }));
-      
+
       await db.records.bulkAdd(newRecords);
 
       const newIndex = maxId === 0 ? 0 : maxId;
       setCurrentIndex(newIndex);
       await db.session.put({ key: 'currentIndex', value: newIndex });
     });
-    
+
     showAlert(`Appended ${parsedRecords.length} records to list.`, 'success');
   };
 
@@ -244,6 +251,26 @@ export default function App() {
     showAlert('Memory cleared. You can upload a new list.', 'info');
   };
 
+  // Branded header component
+  const AppHeader = () => (
+    <header className="header">
+      <div className="container" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <button
+          className="hamburger-btn header-hamburger"
+          onClick={() => setShowMenu(true)}
+          style={{ position: 'relative', borderColor: 'var(--neutral-200)', color: 'var(--neutral-400)' }}
+        >
+          <Menu size={20} />
+          {activeRecords.length > 0 && <span className="menu-badge">{activeRecords.length}</span>}
+        </button>
+        <div className="brand-logo">
+          <span className="brand-main">Manifest</span>
+          <span className="brand-sub">fellowship</span>
+        </div>
+      </div>
+    </header>
+  );
+
   if (!setupComplete) {
     return (
       <SetupScreen
@@ -259,18 +286,7 @@ export default function App() {
   if (showReport) {
     return (
       <>
-        <header className="header">
-          <div className="container" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <button className="hamburger-btn header-hamburger" onClick={() => setShowMenu(true)} style={{ position: 'relative', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}>
-              <Menu size={20} />
-              {activeRecords.length > 0 && <span className="menu-badge">{activeRecords.length}</span>}
-            </button>
-            <div>
-              <h1>Church Call Center Assistant</h1>
-              <p>{callerName} • {branchName}</p>
-            </div>
-          </div>
-        </header>
+        <AppHeader />
         <div className="container">
           {alert && <div className={`alert ${alert.type}`}>{alert.message}</div>}
           <ReportPage
@@ -285,9 +301,7 @@ export default function App() {
           records={activeRecords}
           onSelectContact={handleSelectContact}
           onClearMemory={handleClearMemory}
-          onShowReport={() => {
-            setShowMenu(false);
-          }}
+          onShowReport={() => setShowMenu(false)}
           currentRecordIndex={currentIndex}
         />
       </>
@@ -296,26 +310,26 @@ export default function App() {
 
   return (
     <div>
-      <header className="header">
-        <div className="container" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <button className="hamburger-btn header-hamburger" onClick={() => setShowMenu(true)} style={{ position: 'relative', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}>
-            <Menu size={20} />
-            {activeRecords.length > 0 && <span className="menu-badge">{activeRecords.length}</span>}
-          </button>
-          <div style={{ flex: 1 }}>
-            <h1>Church Call Center Assistant</h1>
-            <p>{activeRecords.length === 0 ? 'Offline-First Campaign Manager' : `${callerName} • ${branchName}`}</p>
-          </div>
-        </div>
-      </header>
+      <AppHeader />
 
       <div className="container">
         {showInstallBanner && (
-          <div className="install-banner">
-            <p>
+          <div
+            className="install-banner"
+            style={{
+              background: 'linear-gradient(135deg, #0a0a0a 0%, #171717 100%)',
+              border: '1px solid var(--neutral-200)',
+            }}
+          >
+            <p style={{ color: 'var(--neutral-500)' }}>
               <Smartphone size={18} /> Install this app for fully offline calling sessions.
             </p>
-            <button type="button" className="install-btn" onClick={handleInstall}>
+            <button
+              type="button"
+              className="install-btn"
+              style={{ background: 'var(--primary)', color: '#000' }}
+              onClick={handleInstall}
+            >
               Install App
             </button>
           </div>
@@ -355,6 +369,7 @@ export default function App() {
                   currentRecord={currentRecord}
                   callerName={callerName}
                   branchName={branchName}
+                  onUpdateContact={handleUpdateContact} // Pass new prop
                 />
                 <TrackingPanel
                   record={currentRecord}
