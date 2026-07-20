@@ -1,3 +1,4 @@
+import { Download } from 'lucide-react';
 import type { CampaignRecord, CallStatus } from '../types';
 
 interface TrackingPanelProps {
@@ -7,7 +8,8 @@ interface TrackingPanelProps {
   onUpdateRecord: (field: 'status' | 'customResponse' | 'notes', value: string) => Promise<void>;
   onPrevious: () => void;
   onNext: () => void;
-  onComplete: () => Promise<void>;
+  onComplete: () => void;
+  onDownloadReport: () => void;
 }
 
 const STATUS_OPTIONS: Array<{ value: CallStatus; label: string }> = [
@@ -28,6 +30,7 @@ export function TrackingPanel({
   onPrevious,
   onNext,
   onComplete,
+  onDownloadReport,
 }: TrackingPanelProps) {
   const isLastRecord = currentIndex === totalRecords - 1;
 
@@ -37,7 +40,6 @@ export function TrackingPanel({
         <h3>Call Status</h3>
         <select
           className="status-dropdown"
-          /* Added || '' fallback wrapper to bind stably to placeholder if status is undefined or empty */
           value={record.status || ''}
           onChange={async (event) => {
             const selectedValue = event.target.value as CallStatus;
@@ -48,7 +50,6 @@ export function TrackingPanel({
           }}
         >
           {STATUS_OPTIONS.map((option) => (
-            /* Switched key targeting from label to stable unique value string identifier */
             <option key={option.value} value={option.value} disabled={option.value === ''}>
               {option.label}
             </option>
@@ -81,15 +82,28 @@ export function TrackingPanel({
         <button type="button" className="nav-button secondary" onClick={onPrevious} disabled={currentIndex === 0}>
           Previous
         </button>
-        {isLastRecord ? (
-          <button type="button" className="nav-button success" onClick={onComplete}>
-            Complete &amp; Export
+        
+        <div className="nav-actions-right">
+          <button
+            type="button"
+            className="nav-button download"
+            onClick={onDownloadReport}
+            title="Download report without completing"
+          >
+            <Download size={16} />
+            <span>Download</span>
           </button>
-        ) : (
-          <button type="button" className="nav-button primary" onClick={onNext}>
-            Next
-          </button>
-        )}
+          
+          {isLastRecord ? (
+            <button type="button" className="nav-button success" onClick={onComplete}>
+              Finish List
+            </button>
+          ) : (
+            <button type="button" className="nav-button primary" onClick={onNext}>
+              Next
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
