@@ -1,6 +1,6 @@
 import { useRef, type DragEvent } from 'react';
 import * as XLSX from 'xlsx';
-import { FileSpreadsheet, Upload, CheckCircle2, ShieldAlert, PhoneCall, Save } from 'lucide-react';
+import { FileSpreadsheet, Upload, CheckCircle2, ShieldAlert, PhoneCall, Save, Search } from 'lucide-react';
 import type { CampaignRecord, CallStatus } from '../types';
 
 interface UploadZoneProps {
@@ -10,6 +10,8 @@ interface UploadZoneProps {
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 50000;
+const HEADER_SCAN_ROWS = 25; // Scan up to 25 rows for headers
+const HEADER_SCAN_COLS = 100; // Scan up to 100 columns for headers
 
 function fuzzyMatch(value: string, patterns: string[]) {
   const normalized = value.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -19,6 +21,84 @@ function fuzzyMatch(value: string, patterns: string[]) {
 function normalizePhone(phone: unknown) {
   if (phone === null || phone === undefined) return '';
   return String(phone).replace(/[^+\d]/g, '');
+}
+
+interface HeaderSearchResult {
+  nameColIndex: number;
+  phoneColIndex: number;
+  dataStartRow: number;
+  headerRowFound: number;
+}
+
+function findHeaders(rawData: unknown[][]): HeaderSearchResult | null {
+  // Strategy 1: Find a row that contains BOTH headers
+  for (let r = 0; r < Math.min(HEADER_SCAN_ROWS, rawData.length); r++) {
+    const row = rawData[r];
+    if (!row) continue;
+
+    let tempNameIdx = -1;
+    let tempPhoneIdx = -1;
+
+    for (let c = 0; c < Math.min(HEADER_SCAN_COLS, row.length); c++) {
+      const cellVal = row[c];
+      if (cellVal === null || cellVal === undefined || cellVal === '') continue;
+
+      const cellStr = String(cellVal).trim();
+      if (!cellStr) continue;
+
+      if (tempNameIdx === -1 && fuzzyMatch(cellStr, ['name', 'fullname', 'membername', 'congregant', 'firstname', 'lastname', 'customername', 'clientname'])) {
+        tempNameIdx = c;
+      }
+      if (tempPhoneIdx === -1 && fuzzyMatch(cellStr, ['phone', 'contact', 'telephone', 'mobile', 'cell', 'phonenumber', 'contactnumber', 'mobilenumber', 'tel'])) {
+        tempPhoneIdx = c;
+      }
+    }
+
+    if (tempNameIdx !== -1 && tempPhoneIdx !== -1) {
+      return {
+        nameColIndex: tempNameIdx,
+        phoneColIndex: tempPhoneIdx,
+        dataStartRow: r + 1,
+        headerRowFound: r,
+      };
+    }
+  }
+
+  // Strategy 2: Headers might be in DIFFERENT rows (e.g., due to merged cells or multi-row headers)
+  // Find name header in any row, find phone header in any row, use the max row + 1 as data start
+  let nameResult: { row: number; col: number } | null = null;
+  let phoneResult: { row: number; col: number } | null = null;
+
+  for (let r = 0; r < Math.min(HEADER_SCAN_ROWS, rawData.length); r++) {
+    const row = rawData[r];
+    if (!row) continue;
+
+    for (let c = 0; c < Math.min(HEADER_SCAN_COLS, row.length); c++) {
+      const cellVal = row[c];
+      if (cellVal === null || cellVal === undefined || cellVal === '') continue;
+
+      const cellStr = String(cellVal).trim();
+      if (!cellStr) continue;
+
+      if (!nameResult && fuzzyMatch(cellStr, ['name', 'fullname', 'membername', 'congregant', 'firstname', 'lastname', 'customername', 'clientname'])) {
+        nameResult = { row: r, col: c };
+      }
+      if (!phoneResult && fuzzyMatch(cellStr, ['phone', 'contact', 'telephone', 'mobile', 'cell', 'phonenumber', 'contactnumber', 'mobilenumber', 'tel'])) {
+        phoneResult = { row: r, col: c };
+      }
+    }
+  }
+
+  if (nameResult && phoneResult) {
+    return {
+      nameColIndex: nameResult.col,
+      phoneColIndex: phoneResult.col,
+      dataStartRow: Math.max(nameResult.row, phoneResult.row) + 1,
+      headerRowFound: Math.max(nameResult.row, phoneResult.row),
+    };
+  }
+
+  return null;
 }
 
 export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
@@ -40,50 +120,94 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array' });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' });
 
-      if (rows.length === 0) {
+      // Read as 2D array to manually scan for headers
+      // This preserves structure even with merged cells or messy formatting
+      const rawData = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+        header: 1,
+        defval: '',
+      });
+
+      if (rawData.length === 0) {
         onAlert('No data found in the uploaded file.', 'error');
         return;
       }
 
-      if (rows.length > MAX_ROWS) {
-        onAlert('File contains too many rows. Please split the file and try again.', 'error');
+      // Scan for headers across multiple rows
+      const headerResult = findHeaders(rawData);
+
+      if (!headerResult) {
+        onAlert(
+          `Could not detect name and phone columns in the first ${HEADER_SCAN_ROWS} rows. ` +
+          `Please ensure your file has columns with headers like "Name" and "Phone".`,
+          'error'
+        );
         return;
       }
 
-      const firstRowColumns = Object.keys(rows[0]);
-      const nameCol = firstRowColumns.find((column) =>
-        fuzzyMatch(column, ['name', 'fullname', 'membername', 'congregant']),
-      );
-      const phoneCol = firstRowColumns.find((column) =>
-        fuzzyMatch(column, ['phone', 'contact', 'telephone', 'mobile', 'number']),
-      );
+      const { nameColIndex, phoneColIndex, dataStartRow, headerRowFound } = headerResult;
 
-      if (!nameCol || !phoneCol) {
-        onAlert('Could not detect name and phone columns.', 'error');
+      // Calculate available data rows
+      const availableDataRows = rawData.length - dataStartRow;
+
+      if (availableDataRows <= 0) {
+        onAlert('Found headers but no data rows below them.', 'error');
         return;
       }
 
-      const transformed: CampaignRecord[] = rows
-        .map((row, index) => ({
-          id: index,
-          congregantId: index,
-          name: String(row[nameCol] ?? '').trim(),
-          phone: normalizePhone(row[phoneCol]),
+      if (availableDataRows > MAX_ROWS) {
+        onAlert(
+          `File contains ${availableDataRows.toLocaleString()} data rows (max ${MAX_ROWS.toLocaleString()}). ` +
+          `Please split the file and try again.`,
+          'error'
+        );
+        return;
+      }
+
+      // Extract data starting from the row after headers
+      const transformed: CampaignRecord[] = [];
+
+      for (let r = dataStartRow; r < rawData.length; r++) {
+        const row = rawData[r];
+        if (!row) continue;
+
+        // Safely access cells - they might not exist if row is shorter
+        const nameRaw = row[nameColIndex];
+        const phoneRaw = row[phoneColIndex];
+
+        const name = String(nameRaw ?? '').trim();
+        const phone = normalizePhone(phoneRaw);
+
+        // Skip completely empty rows
+        if (!name && !phone) continue;
+
+        transformed.push({
+          id: transformed.length,
+          congregantId: transformed.length,
+          name,
+          phone,
           status: '' as CallStatus,
           notes: '',
           customResponse: '',
-        }))
-        .filter((record) => record.name.length > 0 || record.phone.length > 0);
+        });
+      }
 
       if (transformed.length === 0) {
-        onAlert('Uploaded file did not produce usable records.', 'error');
+        onAlert('Found headers but no usable data in the rows below.', 'error');
         return;
       }
 
       await onRecordsParsed(transformed);
-      onAlert(`Loaded ${transformed.length} records successfully.`, 'success');
+      
+      // Inform user about header detection
+      const headerNote = headerRowFound > 0
+        ? ` (headers found in row ${headerRowFound + 1})`
+        : '';
+      
+      onAlert(
+        `Loaded ${transformed.length.toLocaleString()} records successfully${headerNote}.`,
+        'success'
+      );
     } catch (error) {
       onAlert(`Error parsing file: ${(error as Error).message}`, 'error');
     }
@@ -130,7 +254,7 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
           padding: '2.5rem 1.5rem',
           textAlign: 'center',
           backgroundColor: 'var(--neutral-100)',
-          cursor: 'pointer', // Fixed syntax error here
+          cursor: 'pointer',
           transition: 'all 0.2s ease',
           marginBottom: '2rem'
         }}
@@ -159,7 +283,7 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
         </p>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', background: '#ffffff', padding: '0.4rem 0.8rem', borderRadius: '20px', border: '1px solid var(--neutral-200)', color: 'var(--neutral-600)' }}>
           <FileSpreadsheet size={14} style={{ color: 'var(--success)' }} />
-          <span>Auto-detects columns looking like <strong>Name</strong> and <strong>Phone</strong></span>
+          <span>Smart scan finds headers even with title rows or merged cells</span>
         </div>
       </div>
 
@@ -175,9 +299,18 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
             <div style={{ color: 'var(--primary)', marginTop: '2px' }}><CheckCircle2 size={18} /></div>
             <div>
               <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--neutral-900)' }}>1. Prepare Your Spreadsheet</h4>
-              <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem' }}>
-                Your Excel or CSV file just needs two basic columns. The system automatically scans for column headers like <em>Name, Full Name, Phone, Contact, or Mobile</em>.
-                <b>NOTE:</b> The Document should  <b>NOT</b> have a heading line eg. List of members.
+              <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem', lineHeight: '1.5' }}>
+                Your file just needs columns containing names and phone numbers. The system scans up to <strong>25 rows</strong> and <strong>100 columns</strong> to find headers like <em>Name, Full Name, Phone, Contact, Mobile</em>, etc.—even if your file has a title row or merged header cells.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <div style={{ color: '#8b5cf6', marginTop: '2px' }}><Search size={18} /></div>
+            <div>
+              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--neutral-900)' }}>1b. Handles Messy Files</h4>
+              <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem', lineHeight: '1.5' }}>
+                No need to clean up your file first! The scanner will skip over title rows like "Church Member List 2024", handle merged cells, and find your data columns regardless of where they are positioned.
               </p>
             </div>
           </div>
@@ -186,7 +319,7 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
             <div style={{ color: 'var(--success)', marginTop: '2px' }}><PhoneCall size={18} /></div>
             <div>
               <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--neutral-900)' }}>2. Call with One Tap</h4>
-              <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem' }}>
+              <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem', lineHeight: '1.5' }}>
                 The workspace guides you through the sheet contact by contact. Tap the <strong>Call Now</strong> button to launch your device's native phone dialer immediately without jumping between windows.
               </p>
             </div>
@@ -196,7 +329,7 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
             <div style={{ color: 'var(--warning)', marginTop: '2px' }}><Save size={18} /></div>
             <div>
               <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--neutral-900)' }}>3. Log Responses & Export Progress</h4>
-              <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem' }}>
+              <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem', lineHeight: '1.5' }}>
                 Select an outcome from the dropdown menu and type extra prayer requests or remarks. Your progress automatically saves to the device. Click the disk icon anytime or finish the list to export an updated Excel report tracking all details.
               </p>
             </div>
