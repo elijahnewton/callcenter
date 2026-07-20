@@ -318,7 +318,7 @@ export function UploadZone({ onRecordsParsed, onAlert }: UploadZoneProps) {
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <div style={{ color: 'var(--success)', marginTop: '2px' }}><PhoneCall size={18} /></div>
             <div>
-              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--neutral-900)' }}>2. Call with One Tap</h4>
+              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--neutral-900)' }}>2. Call with One Tap.</h4>
               <p style={{ fontSize: '0.825rem', color: 'var(--neutral-600)', marginTop: '0.15rem', lineHeight: '1.5' }}>
                 The workspace guides you through the sheet contact by contact. Tap the <strong>Call Now</strong> button to launch your device's native phone dialer immediately without jumping between windows.
               </p>
