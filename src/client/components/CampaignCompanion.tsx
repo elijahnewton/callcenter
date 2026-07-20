@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect, ChangeEvent } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import type { ChangeEvent } from 'react';
 import * as XLSX from 'xlsx';
 import { 
   ArrowLeft, Camera, Sparkles, FileSpreadsheet, FileText, 
-  Play, Info, CheckCircle, AlertCircle, Loader2, XCircle 
+  Play, Info, CheckCircle, Loader2, XCircle 
 } from 'lucide-react';
 
 interface CampaignCompanionProps {
