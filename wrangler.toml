@@ -16,7 +16,7 @@ invocation_logs = true
 [[d1_databases]]
 binding = "DB"
 database_name = "campaign-db"
-database_id = "local-db"
+database_id = "410a10bb-4a09-43e0-83a1-51b11171d685"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
