@@ -25,4 +25,4 @@ class_name = "GroupCoordinator"
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["DriveShardDurableObject", "RateLimiterDurableObject"]
+new_sqlite_classes = ["GroupCoordinator"]
