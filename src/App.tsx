@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import * as XLSX from 'xlsx';
-import { Smartphone, Menu } from 'lucide-react';
+import { Smartphone, Menu, Sun, Moon } from 'lucide-react';
 import { db } from './db/database';
 import type { CampaignRecord } from './types';
 import { SetupScreen } from './components/SetupScreen';
@@ -14,11 +14,10 @@ import { ReportPage } from './components/ReportPage';
 const DEFAULT_SCRIPT = 'Hello [Name], my name is [CallerName] calling from "[BranchName]". I am calling to know how you\'re doing and to invite you for service.';
 
 type AlertType = 'success' | 'error' | 'info';
+type ThemeType = 'dark' | 'light';
 
 declare global {
-  interface WindowEventMap {
-    beforeinstallprompt: BeforeInstallPromptEvent;
-  }
+  interface WindowEventMap { beforeinstallprompt: BeforeInstallPromptEvent; }
   interface BeforeInstallPromptEvent extends Event {
     prompt: () => Promise<void>;
     userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
@@ -44,8 +43,23 @@ export default function App() {
   const [alert, setAlert] = useState<{ message: string; type: AlertType } | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [showReport, setShowReport] = useState(false);
+  
+  // --- THEME STATE ---
+  const [theme, setTheme] = useState<ThemeType>(() => {
+    return (localStorage.getItem('app-theme') as ThemeType) || 'dark';
+  });
 
   const hydratedRef = useRef(false);
+
+  // Apply theme to HTML element
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('app-theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
 
   useEffect(() => {
     if (hydratedRef.current || sessionEntries === undefined) return;
@@ -121,7 +135,6 @@ export default function App() {
     await db.records.update(currentRecord.id, { [field]: value });
   };
 
-  // --- NEW: EDIT CONTACT HANDLER ---
   const handleUpdateContact = async (name: string, phone: string) => {
     if (!currentRecord) return;
     await db.records.update(currentRecord.id, { name, phone });
@@ -135,7 +148,7 @@ export default function App() {
     const dbRecords = await db.records.toArray();
     if (dbRecords.length === 0) { showAlert('No records to export.', 'error'); return; }
     const statusLabels: Record<string, string> = { yes: 'Yes', no: 'No', notpicking: 'Not Picking', phoneoff: 'Phone Off', changedaddr: 'Changed Address', other: 'Other' };
-    const exportRecords = dbRecords.map((record) => ({ Name: record.name, Phone: record.phone, Status: statusLabels[record.status] || record.status || 'Not Called', 'Custom Response': record.status === 'other' ? record.customResponse : '', Notes: record.notes }));
+    const exportRecords = dbRecords.map((r) => ({ Name: r.name, Phone: r.phone, Status: statusLabels[r.status] || r.status || 'Not Called', 'Custom Response': r.status === 'other' ? r.customResponse : '', Notes: r.notes }));
     const worksheet = XLSX.utils.json_to_sheet(exportRecords);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Campaign Results');
@@ -172,6 +185,12 @@ export default function App() {
           <span className="brand-main">Manifest</span>
           <span className="brand-sub">fellowship</span>
         </div>
+        
+        <div className="header-actions">
+          <button className="theme-toggle-btn" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+        </div>
       </div>
     </header>
   );
@@ -194,9 +213,9 @@ export default function App() {
       <AppHeader />
       <div className="container">
         {showInstallBanner && (
-          <div className="install-banner" style={{ background: 'var(--bg-card)', border: '1px solid var(--primary)' }}>
-            <p style={{ color: 'var(--neutral-400)' }}><Smartphone size={18} /> Install this app for fully offline calling sessions.</p>
-            <button type="button" className="install-btn" style={{ background: 'var(--primary)', color: '#000' }} onClick={handleInstall}>Install App</button>
+          <div className="install-banner">
+            <p><Smartphone size={20} color="var(--primary)" /> Install this app for fully offline calling sessions.</p>
+            <button type="button" className="install-btn" onClick={handleInstall}>Install App</button>
           </div>
         )}
         {alert && <div className={`alert ${alert.type}`}>{alert.message}</div>}
@@ -216,13 +235,7 @@ export default function App() {
             </div>
             {currentRecord && (
               <div className="main-layout">
-                <Teleprompter
-                  script={script}
-                  currentRecord={currentRecord}
-                  callerName={callerName}
-                  branchName={branchName}
-                  onUpdateContact={handleUpdateContact} 
-                />
+                <Teleprompter script={script} currentRecord={currentRecord} callerName={callerName} branchName={branchName} onUpdateContact={handleUpdateContact} />
                 <TrackingPanel record={currentRecord} currentIndex={currentIndex} totalRecords={activeRecords.length} onUpdateRecord={updateRecord} onPrevious={goPrevious} onNext={goNext} onComplete={() => setShowReport(true)} onDownloadReport={exportData} />
               </div>
             )}
