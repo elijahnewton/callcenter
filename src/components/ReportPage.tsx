@@ -1,4 +1,4 @@
-import { ArrowLeft, Download, UserCheck, UserX, Phone, PhoneOff, CheckCircle2, XCircle, AlertTriangle, MapPin, HelpCircle } from 'lucide-react';
+import { ArrowLeft, Download, UserCheck, UserX, Phone, PhoneOff, CheckCircle2, XCircle, MapPin, HelpCircle } from 'lucide-react';
 import type { CampaignRecord } from '../types';
 
 interface ReportPageProps {
@@ -16,13 +16,13 @@ interface StatusCount {
 
 export function ReportPage({ records, onBack, onDownloadReport }: ReportPageProps) {
   const totalRecords = records.length;
-  const calledRecords = records.filter((r) => r.status && r.status !== '');
-  const notCalledRecords = records.filter((r) => !r.status || r.status === '');
+  // Fixed TS2367: checking truthiness instead of comparing to ''
+  const calledRecords = records.filter((r) => !!r.status);
+  const notCalledRecords = records.filter((r) => !r.status);
   const calledCount = calledRecords.length;
   const notCalledCount = notCalledRecords.length;
   const completionRate = totalRecords > 0 ? Math.round((calledCount / totalRecords) * 100) : 0;
 
-  // Count by status
   const statusCounts: StatusCount[] = [
     {
       label: 'Yes',
@@ -70,13 +70,11 @@ export function ReportPage({ records, onBack, onDownloadReport }: ReportPageProp
 
   const maxStatusCount = Math.max(...statusCounts.map((s) => s.count), 1);
 
-  // Yes rate (positive responses)
   const yesCount = records.filter((r) => r.status === 'yes').length;
   const yesRate = calledCount > 0 ? Math.round((yesCount / calledCount) * 100) : 0;
 
   return (
     <div className="report-page">
-      {/* Header */}
       <div className="report-header">
         <button className="report-back-btn" onClick={onBack}>
           <ArrowLeft size={20} />
@@ -89,7 +87,6 @@ export function ReportPage({ records, onBack, onDownloadReport }: ReportPageProp
         </button>
       </div>
 
-      {/* Summary Cards */}
       <div className="report-summary-cards">
         <div className="summary-card total">
           <div className="summary-card-icon">
@@ -132,11 +129,9 @@ export function ReportPage({ records, onBack, onDownloadReport }: ReportPageProp
         </div>
       </div>
 
-      {/* Completion Ring */}
       <div className="report-ring-section">
         <div className="completion-ring-container">
           <svg viewBox="0 0 120 120" className="completion-ring">
-            {/* Background circle */}
             <circle
               cx="60"
               cy="60"
@@ -145,7 +140,6 @@ export function ReportPage({ records, onBack, onDownloadReport }: ReportPageProp
               stroke="var(--neutral-200)"
               strokeWidth="10"
             />
-            {/* Progress circle */}
             <circle
               cx="60"
               cy="60"
@@ -158,7 +152,6 @@ export function ReportPage({ records, onBack, onDownloadReport }: ReportPageProp
               transform="rotate(-90 60 60)"
               className="ring-progress"
             />
-            {/* Center text */}
             <text x="60" y="55" textAnchor="middle" className="ring-text-large">
               {completionRate}%
             </text>
@@ -179,7 +172,6 @@ export function ReportPage({ records, onBack, onDownloadReport }: ReportPageProp
         )}
       </div>
 
-      {/* Status Distribution Chart */}
       <div className="report-chart-section">
         <h2>Status Distribution</h2>
         <div className="bar-chart">
@@ -206,7 +198,6 @@ export function ReportPage({ records, onBack, onDownloadReport }: ReportPageProp
         </div>
       </div>
 
-      {/* Proportional Pie (CSS-based) */}
       <div className="report-chart-section">
         <h2>Response Breakdown</h2>
         {calledCount > 0 ? (
@@ -256,7 +247,6 @@ export function ReportPage({ records, onBack, onDownloadReport }: ReportPageProp
         )}
       </div>
 
-      {/* Recent Activity */}
       <div className="report-chart-section">
         <h2>Recent Calls</h2>
         <div className="recent-calls-list">
