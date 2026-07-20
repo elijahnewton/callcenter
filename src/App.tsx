@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import * as XLSX from 'xlsx';
-import { Download, Smartphone, Menu } from 'lucide-react';
+import { Smartphone, Menu } from 'lucide-react'; // Removed Download here
 import { db } from './db/database';
 import type { CampaignRecord } from './types';
 import { SetupScreen } from './components/SetupScreen';
@@ -45,7 +45,6 @@ export default function App() {
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [alert, setAlert] = useState<{ message: string; type: AlertType } | null>(null);
   
-  // New State for Menu and Reports
   const [showMenu, setShowMenu] = useState(false);
   const [showReport, setShowReport] = useState(false);
 
@@ -177,7 +176,6 @@ export default function App() {
       phoneoff: 'Phone Off',
       changedaddr: 'Changed Address',
       other: 'Other',
-      '': 'Not Called',
     };
 
     const exportRecords = dbRecords.map((record) => ({
@@ -193,11 +191,11 @@ export default function App() {
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Campaign Results');
 
     worksheet['!cols'] = [
-      { wch: 25 }, // Name
-      { wch: 18 }, // Phone
-      { wch: 15 }, // Status
-      { wch: 30 }, // Custom Response
-      { wch: 50 }, // Notes
+      { wch: 25 },
+      { wch: 18 },
+      { wch: 15 },
+      { wch: 30 },
+      { wch: 50 },
     ];
 
     const timestamp = new Date().toISOString().split('T')[0];
@@ -207,7 +205,6 @@ export default function App() {
 
   const handleRecordsParsed = async (parsedRecords: CampaignRecord[]) => {
     await db.transaction('rw', db.records, db.session, async () => {
-      // Find the highest existing ID to append instead of replace
       const maxId = await db.records.orderBy('id').last().then((r) => r?.id ?? 0);
       
       const newRecords = parsedRecords.map((r, i) => ({
@@ -218,7 +215,6 @@ export default function App() {
       
       await db.records.bulkAdd(newRecords);
 
-      // Set index to the start of the newly added records
       const newIndex = maxId === 0 ? 0 : maxId;
       setCurrentIndex(newIndex);
       await db.session.put({ key: 'currentIndex', value: newIndex });
@@ -260,7 +256,6 @@ export default function App() {
     );
   }
 
-  // Render Report View
   if (showReport) {
     return (
       <>
@@ -292,7 +287,6 @@ export default function App() {
           onClearMemory={handleClearMemory}
           onShowReport={() => {
             setShowMenu(false);
-            // Already on report page, do nothing
           }}
           currentRecordIndex={currentIndex}
         />
@@ -375,7 +369,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Collapsible Append Section */}
             <details className="load-more-section">
               <summary>+ Load another list (appends to current contacts)</summary>
               <div style={{ marginTop: '0.75rem' }}>
@@ -386,7 +379,6 @@ export default function App() {
         )}
       </div>
 
-      {/* Side Menu Overlay */}
       <SideMenu
         isOpen={showMenu}
         onClose={() => setShowMenu(false)}
