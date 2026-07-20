@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import * as XLSX from 'xlsx';
-import { Download, Smartphone } from 'lucide-react';
+import { Download, Smartphone, Menu } from 'lucide-react';
 import { db } from './db/database';
 import type { CampaignRecord } from './types';
 import { SetupScreen } from './components/SetupScreen';
 import { UploadZone } from './components/UploadZone';
 import { Teleprompter } from './components/Teleprompter';
 import { TrackingPanel } from './components/TrackingPanel';
+import { SideMenu } from './components/SideMenu';
+import { ReportPage } from './components/ReportPage';
 
 const DEFAULT_SCRIPT =
   'Hello [Name], my name is [CallerName] calling from "[BranchName]". I am calling to know how you\'re doing and to invite you for service.';
@@ -42,6 +44,10 @@ export default function App() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [alert, setAlert] = useState<{ message: string; type: AlertType } | null>(null);
+  
+  // New State for Menu and Reports
+  const [showMenu, setShowMenu] = useState(false);
+  const [showReport, setShowReport] = useState(false);
 
   const hydratedRef = useRef(false);
 
@@ -157,45 +163,89 @@ export default function App() {
     }
   };
 
-  const exportData = async (isCompletion = false) => {
+  const exportData = async () => {
     const dbRecords = await db.records.toArray();
     if (dbRecords.length === 0) {
       showAlert('No records to export.', 'error');
       return;
     }
 
+    const statusLabels: Record<string, string> = {
+      yes: 'Yes',
+      no: 'No',
+      notpicking: 'Not Picking',
+      phoneoff: 'Phone Off',
+      changedaddr: 'Changed Address',
+      other: 'Other',
+      '': 'Not Called',
+    };
+
     const exportRecords = dbRecords.map((record) => ({
-      name: record.name,
-      phone: record.phone,
-      status: record.status,
-      customResponse: record.customResponse,
-      notes: record.notes,
+      Name: record.name,
+      Phone: record.phone,
+      Status: statusLabels[record.status] || record.status || 'Not Called',
+      'Custom Response': record.status === 'other' ? record.customResponse : '',
+      Notes: record.notes,
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportRecords);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Records');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Campaign Results');
+
+    worksheet['!cols'] = [
+      { wch: 25 }, // Name
+      { wch: 18 }, // Phone
+      { wch: 15 }, // Status
+      { wch: 30 }, // Custom Response
+      { wch: 50 }, // Notes
+    ];
 
     const timestamp = new Date().toISOString().split('T')[0];
-    const filename = isCompletion ? `Completed_${timestamp}.xlsx` : `In_Progress_${timestamp}.xlsx`;
-    XLSX.writeFile(workbook, filename);
-
-    showAlert(`Exported as ${filename}.`, 'success');
-
-    if (isCompletion) {
-      await db.records.clear();
-      setCurrentIndex(0);
-      showAlert('Campaign finished. Database cleared for a new upload.', 'success');
-    }
+    XLSX.writeFile(workbook, `campaign-report-${timestamp}.xlsx`);
+    showAlert('Report downloaded successfully.', 'success');
   };
 
   const handleRecordsParsed = async (parsedRecords: CampaignRecord[]) => {
     await db.transaction('rw', db.records, db.session, async () => {
-      await db.records.clear();
-      await db.records.bulkAdd(parsedRecords);
-      await db.session.put({ key: 'currentIndex', value: 0 });
+      // Find the highest existing ID to append instead of replace
+      const maxId = await db.records.orderBy('id').last().then((r) => r?.id ?? 0);
+      
+      const newRecords = parsedRecords.map((r, i) => ({
+        ...r,
+        id: maxId + i + 1,
+        congregantId: maxId + i + 1,
+      }));
+      
+      await db.records.bulkAdd(newRecords);
+
+      // Set index to the start of the newly added records
+      const newIndex = maxId === 0 ? 0 : maxId;
+      setCurrentIndex(newIndex);
+      await db.session.put({ key: 'currentIndex', value: newIndex });
     });
+    
+    showAlert(`Appended ${parsedRecords.length} records to list.`, 'success');
+  };
+
+  const handleComplete = () => {
+    setShowReport(true);
+  };
+
+  const handleSelectContact = (index: number) => {
+    setCurrentIndex(index);
+    setShowMenu(false);
+    if (showReport) {
+      setShowReport(false);
+    }
+  };
+
+  const handleClearMemory = async () => {
+    await db.records.clear();
     setCurrentIndex(0);
+    await db.session.put({ key: 'currentIndex', value: 0 });
+    setShowMenu(false);
+    setShowReport(false);
+    showAlert('Memory cleared. You can upload a new list.', 'info');
   };
 
   if (!setupComplete) {
@@ -210,12 +260,58 @@ export default function App() {
     );
   }
 
+  // Render Report View
+  if (showReport) {
+    return (
+      <>
+        <header className="header">
+          <div className="container" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <button className="hamburger-btn header-hamburger" onClick={() => setShowMenu(true)} style={{ position: 'relative', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}>
+              <Menu size={20} />
+              {activeRecords.length > 0 && <span className="menu-badge">{activeRecords.length}</span>}
+            </button>
+            <div>
+              <h1>Church Call Center Assistant</h1>
+              <p>{callerName} • {branchName}</p>
+            </div>
+          </div>
+        </header>
+        <div className="container">
+          {alert && <div className={`alert ${alert.type}`}>{alert.message}</div>}
+          <ReportPage
+            records={activeRecords}
+            onBack={() => setShowReport(false)}
+            onDownloadReport={exportData}
+          />
+        </div>
+        <SideMenu
+          isOpen={showMenu}
+          onClose={() => setShowMenu(false)}
+          records={activeRecords}
+          onSelectContact={handleSelectContact}
+          onClearMemory={handleClearMemory}
+          onShowReport={() => {
+            setShowMenu(false);
+            // Already on report page, do nothing
+          }}
+          currentRecordIndex={currentIndex}
+        />
+      </>
+    );
+  }
+
   return (
     <div>
       <header className="header">
-        <div className="container">
-          <h1>Church Call Center Assistant</h1>
-          <p>{activeRecords.length === 0 ? 'Offline-First Campaign Manager' : `${callerName} • ${branchName}`}</p>
+        <div className="container" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <button className="hamburger-btn header-hamburger" onClick={() => setShowMenu(true)} style={{ position: 'relative', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}>
+            <Menu size={20} />
+            {activeRecords.length > 0 && <span className="menu-badge">{activeRecords.length}</span>}
+          </button>
+          <div style={{ flex: 1 }}>
+            <h1>Church Call Center Assistant</h1>
+            <p>{activeRecords.length === 0 ? 'Offline-First Campaign Manager' : `${callerName} • ${branchName}`}</p>
+          </div>
         </div>
       </header>
 
@@ -273,17 +369,36 @@ export default function App() {
                   onUpdateRecord={updateRecord}
                   onPrevious={goPrevious}
                   onNext={goNext}
-                  onComplete={() => exportData(true)}
+                  onComplete={handleComplete}
+                  onDownloadReport={exportData}
                 />
               </div>
             )}
 
-            <button type="button" className="fab" onClick={() => exportData(false)} title="Save backup">
-              <Download size={18} />
-            </button>
+            {/* Collapsible Append Section */}
+            <details className="load-more-section">
+              <summary>+ Load another list (appends to current contacts)</summary>
+              <div style={{ marginTop: '0.75rem' }}>
+                <UploadZone onRecordsParsed={handleRecordsParsed} onAlert={showAlert} />
+              </div>
+            </details>
           </>
         )}
       </div>
+
+      {/* Side Menu Overlay */}
+      <SideMenu
+        isOpen={showMenu}
+        onClose={() => setShowMenu(false)}
+        records={activeRecords}
+        onSelectContact={handleSelectContact}
+        onClearMemory={handleClearMemory}
+        onShowReport={() => {
+          setShowMenu(false);
+          if (activeRecords.length > 0) setShowReport(true);
+        }}
+        currentRecordIndex={currentIndex}
+      />
     </div>
   );
 }
