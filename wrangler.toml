@@ -10,7 +10,7 @@ compatibility_flags = ["nodejs_compat"] # CRITICAL: Required for SheetJS (xlsx) 
 binding = "DB"
 database_name = "cloudcall-db"
 # Run `wrangler d1 create cloudcall-db` and paste the ID below
-database_id ="4828ca37-9273-4f25-8d75-b436055ae3b25"
+database_id ="4828ca37-9273-4f25-8d75-b436055ae3b2"
 
 # ---------------------------------------------
 # Durable Objects Binding
