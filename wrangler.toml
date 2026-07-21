@@ -34,3 +34,7 @@ new_sqlite_classes = ["GroupDurableObject"]
 [assets]
 directory = "./dist"
 binding = "ASSETS"
+
+[observability.logs]
+enabled = true
+invocation_logs = true
