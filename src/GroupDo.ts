@@ -11,6 +11,7 @@ interface ContactMemory {
   last_name: string;
   status: 'available' | 'locked' | 'completed';
   locked_by: string | null;
+  assigned_to: string | null; // NEW: User ID or NULL for shared pool
 }
 
 export class GroupDurableObject extends DurableObject<Env> {
@@ -24,7 +25,7 @@ export class GroupDurableObject extends DurableObject<Env> {
     this.groupId = this.ctx.id.toString();
     
     const results = await this.env.DB.prepare(
-      `SELECT id, phone_number, first_name, last_name, status, locked_by 
+      `SELECT id, phone_number, first_name, last_name, status, locked_by, assigned_to 
        FROM contacts WHERE group_id = ? AND status IN ('available', 'locked')`
     ).bind(this.groupId).all<ContactMemory>();
 
@@ -47,19 +48,19 @@ export class GroupDurableObject extends DurableObject<Env> {
     const url = new URL(request.url);
     await this.ensureInitialized();
 
-    // Handle WebSocket Upgrade for Admin Dashboard
+    // Add a reload endpoint to force refresh memory from D1
+    if (request.method === "POST" && url.pathname === "/reload") {
+      this.initialized = false;
+      await this.ensureInitialized();
+      return Response.json({ success: true, queueSize: this.contacts.size });
+    }
+
     if (url.pathname === "/ws") {
       const [client, server] = Object.values(new WebSocketPair());
       server.accept();
       this.sockets.add(server);
       server.addEventListener("close", () => this.sockets.delete(server));
-      
-      // Send initial state on connect
-      server.send(JSON.stringify({ 
-        event: "init", 
-        data: { queueSize: Array.from(this.contacts.values()).filter(c => c.status === 'available').length } 
-      }));
-
+      server.send(JSON.stringify({ event: "init", data: { queueSize: this.contacts.size } }));
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -83,11 +84,15 @@ export class GroupDurableObject extends DurableObject<Env> {
 
   private async lockNextContact(callerId: string): Promise<Response> {
     for (const [id, contact] of this.contacts.entries()) {
-      if (contact.status === 'available') {
+      // CORE LOGIC UPDATE: 
+      // Available AND (Assigned to THIS caller specifically OR Unassigned to anyone [Shared Pool])
+      if (
+        contact.status === 'available' && 
+        (contact.assigned_to === null || contact.assigned_to === callerId)
+      ) {
         contact.status = 'locked';
         contact.locked_by = callerId;
 
-        // Async persistence to D1
         this.ctx.blockWaitUntil(
           this.env.DB.prepare(`UPDATE contacts SET status = 'locked', locked_by = ?, locked_at = datetime('now') WHERE id = ?`)
             .bind(callerId, id).run()
@@ -97,17 +102,17 @@ export class GroupDurableObject extends DurableObject<Env> {
         return Response.json({ success: true, contact });
       }
     }
-    return Response.json({ success: false, message: "Queue empty" });
+    return Response.json({ success: false, message: "No available contacts assigned to you" });
   }
 
   private async completeContact(contactId: string, callerId: string, disposition: string, notes: string): Promise<Response> {
     const contact = this.contacts.get(contactId);
     if (!contact || contact.locked_by !== callerId) {
-      return Response.json({ success: false, error: "Unauthorized or invalid contact" }, { status: 403 });
+      return Response.json({ success: false, error: "Unauthorized" }, { status: 403 });
     }
 
     contact.status = 'completed';
-    this.contacts.delete(contactId); // Remove from memory to save space
+    this.contacts.delete(contactId);
 
     this.ctx.blockWaitUntil(
       this.env.DB.batch(
@@ -126,7 +131,6 @@ export class GroupDurableObject extends DurableObject<Env> {
     if (contact && contact.status === 'locked') {
       contact.status = 'available';
       contact.locked_by = null;
-      
       this.ctx.blockWaitUntil(
         this.env.DB.prepare(`UPDATE contacts SET status = 'available', locked_by = NULL WHERE id = ?`).bind(contactId).run()
       );
