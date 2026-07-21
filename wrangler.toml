@@ -26,10 +26,11 @@ tag = "v2"
 new_sqlite_classes = ["GroupDurableObject"]
 
 # ---------------------------------------------
-# Static Assets (Correct syntax for Wrangler v3)
+# Static Assets (modern Workers Assets binding)
+# run_worker_first = true means all requests hit
+# the Worker first; Hono will serve static assets
+# and fall back to index.html for SPA routes
 # ---------------------------------------------
 [assets]
 directory = "./dist"
 binding = "ASSETS"
-not_found_handling = "single-page-application"
-run_worker_first = ["/api/*"]
