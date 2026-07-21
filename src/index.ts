@@ -213,4 +213,9 @@ app.post("/api/contacts/distribute-evenly", async (c) => {
   return c.json({ success: true, distributed: availableContacts.length, summary });
 });
 
+app.notFound(async (c) => {
+  // Pass the request to Cloudflare's internal static asset server
+  return c.env.ASSETS.fetch(c.req.raw);
+});
+
 export default app;
