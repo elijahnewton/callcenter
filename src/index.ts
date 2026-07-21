@@ -224,9 +224,31 @@ app.post("/api/contacts/distribute-evenly", async (c) => {
   return c.json({ success: true, distributed: availableContacts.length, summary });
 });
 
+// --- SERVE REACT STATIC ASSETS ---
 app.notFound(async (c) => {
-  // Pass the request to Cloudflare's internal static asset server
-  return c.env.ASSETS.fetch(c.req.raw);
+  try {
+    const url = new URL(c.req.url);
+    
+    // Cloudflare internal routes (monitoring, etc.) should 404 normally, not hit assets
+    if (url.pathname.startsWith('/__') || url.pathname.startsWith('/cdn-cgi')) {
+      return c.notFound();
+    }
+    
+    // Fetch the static file (React app)
+    const assetResponse = await c.env.ASSETS.fetch(c.req.raw);
+    
+    // If ASSETS returns a 404, it means a React route was hit, so serve index.html
+    if (assetResponse.status === 404) {
+      // Clone the request but force the URL to /index.html
+      const indexRequest = new Request(new URL('/index.html', c.req.url).href, c.req.raw);
+      return await c.env.ASSETS.fetch(indexRequest);
+    }
+    
+    return assetResponse;
+  } catch (err) {
+    console.error("Asset Serving Error:", err);
+    return c.text("Error loading application assets: " + String(err), 500);
+  }
 });
 
 export default app;
