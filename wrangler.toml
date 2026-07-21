@@ -22,7 +22,7 @@ class_name = "GroupDurableObject"
 # Migrations for Durable Objects
 # ---------------------------------------------
 [[migrations]]
-tag = "v1"
+tag = "v2"
 new_sqlite_classes = ["GroupDurableObject"]
 
 # ---------------------------------------------
