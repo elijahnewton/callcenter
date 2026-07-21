@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import * as XLSX from "xlsx";
-import { GroupDurableObject } from "./GroupDo";
+export { GroupDurableObject } from "./GroupDo";
 import { authenticateRequest, syncUserToD1 } from "./lib/auth";
 
 type Bindings = {
