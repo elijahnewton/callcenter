@@ -1,28 +1,35 @@
-name = "callcenterv3"
-main = "src/server/index.ts"
-compatibility_date = "2026-07-14"
+name = "cloudcall"
+main = "src/index.ts"
+compatibility_date = "2024-05-29"
+compatibility_flags = ["nodejs_compat"] # CRITICAL: Required for SheetJS (xlsx) to work in Workers
 
-[ai]
-binding = "AI"
-
-[assets]
-directory = "./dist"
-binding = "ASSETS"
-
-[observability.logs]
-enabled = true
-invocation_logs = true
-
+# ---------------------------------------------
+# D1 Database Binding
+# ---------------------------------------------
 [[d1_databases]]
 binding = "DB"
-database_name = "campaign-db"
-database_id = "410a10bb-4a09-43e0-83a1-51b11171d685"
-migrations_dir = "migrations"
+database_name = "cloudcall-db"
+# Run `wrangler d1 create cloudcall-db` and paste the ID below
+database_id ="410a10bb-4a09-43e0-83a1-51b11171d685"
 
+# ---------------------------------------------
+# Durable Objects Binding
+# ---------------------------------------------
 [[durable_objects.bindings]]
-name = "GROUP_COORDINATOR"
-class_name = "GroupCoordinator"
+name = "GROUP_DO"
+class_name = "GroupDurableObject"
 
+# Migrations for Durable Objects
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["GroupCoordinator"]
+new_sqlite_classes = ["GroupDurableObject"]
+
+# ---------------------------------------------
+# Static Assets (For serving the Vite React build)
+# ---------------------------------------------
+[site]
+bucket = "./dist"
+
+# Ensure the worker handles all routes, falling back to React Router
+[routes]
+pattern = "/*"
