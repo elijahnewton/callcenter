@@ -2,7 +2,7 @@
 CloudCall is an enterprise-grade, multi-tenant outbound calling application built entirely on Cloudflare's Edge Network. It eliminates double-calling using Cloudflare Durable Objects for zero-latency in-memory state locking, and provides real-time admin visibility via WebSockets.
 
 🏗️ Architecture
-The system splits responsibilities cleanly between persistent storage and ephemeral locking state.
+The system splits responsibilities cleanly between persistent storage and ephemeral locking state
 
 [ React Frontend (Vite) ] ───► Cloudflare Pages / Worker Static Assets          │          ▼ (HTTPS / WSS)[ Cloudflare Worker (Hono) ] ───► JWT Verification, Spreadsheet Parsing, Routing          │             │          ▼             ▼[ Cloudflare D1 ]   [ Durable Object (Per Group) ](SQLite DB)        (In-Memory Locking & WebSockets)
 Worker: Handles authentication, parses Excel files using SheetJS, and writes initial records to D1.
