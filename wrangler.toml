@@ -17,7 +17,7 @@ database_id ="4828ca37-9273-4f25-8d75-b436055ae3b2"
 # ---------------------------------------------
 [[durable_objects.bindings]]
 name = "GROUP_DO"
-class_name = "GroupDurableObject"
+new_sqlite_classes = ["GroupDurableObject"]
 
 # Migrations for Durable Objects
 [[migrations]]
