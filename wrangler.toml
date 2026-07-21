@@ -1,7 +1,7 @@
 name = "cloudcall"
 main = "src/index.ts"
 compatibility_date = "2024-05-29"
-compatibility_flags = ["nodejs_compat"] # CRITICAL: Required for SheetJS (xlsx) to work in Workers
+compatibility_flags = ["nodejs_compat"]
 
 # ---------------------------------------------
 # D1 Database Binding
@@ -18,13 +18,15 @@ database_id = "4828ca37-9273-4f25-8d75-b436055ae3b2"
 name = "GROUP_DO"
 class_name = "GroupDurableObject"
 
+# ---------------------------------------------
 # Migrations for Durable Objects
+# ---------------------------------------------
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["GroupDurableObject"]
+new_classes = ["GroupDurableObject"]
 
 # ---------------------------------------------
-# Static Assets (For serving the Vite React build)
+# Static Assets (Correct syntax for Wrangler v3)
 # ---------------------------------------------
-[assets]
-directory = "./dist"
+[site]
+bucket = "./dist"
