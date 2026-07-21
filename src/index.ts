@@ -14,14 +14,25 @@ type Bindings = {
 const app = new Hono<{ Bindings: Bindings }>();
 app.use("*", cors());
 
-// Middleware to protect all /api routes
+// --- MIDDLEWARE TO PROTECT API ROUTES ---
 app.use("/api/*", async (c, next) => {
-  const payload = await authenticateRequest(c.req.raw, c.env.CLERK_PEM_PUBLIC_KEY);
-  if (!payload) return c.json({ error: "Unauthorized" }, 401);
-  
-  const userContext = await syncUserToD1(c.env.DB, payload);
-  c.set("user", userContext);
-  await next();
+  try {
+    // If the key is missing in production, fail gracefully instead of crashing
+    if (!c.env.CLERK_PEM_PUBLIC_KEY) {
+      return c.json({ error: "Server configuration error: Missing Clerk Key" }, 500);
+    }
+
+    const payload = await authenticateRequest(c.req.raw, c.env.CLERK_PEM_PUBLIC_KEY);
+    if (!payload) return c.json({ error: "Unauthorized" }, 401);
+    
+    const userContext = await syncUserToD1(c.env.DB, payload);
+    c.set("user", userContext);
+    await next();
+  } catch (err) {
+    // Catch any JWT parsing errors so the worker doesn't 500
+    console.error("Auth Middleware Error:", err);
+    return c.json({ error: "Authentication failed", details: String(err) }, 401);
+  }
 });
 
 // --- UPLOAD CONTACTS (Admin Only) ---
