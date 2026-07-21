@@ -17,10 +17,8 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8787',
         changeOrigin: true,
-      },
-      // If you implement raw websocket paths at the root, proxy them here
-      '/ws': {
-        target: 'ws://localhost:8787',
+        // The admin dashboard's WebSocket lives at /api/dashboard/ws, so this
+        // rule needs ws:true too — a separate /ws rule never matches that path.
         ws: true,
       }
     }
