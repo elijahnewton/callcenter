@@ -3,9 +3,17 @@ import type { JwtPayload } from "@clerk/backend";
 
 export async function authenticateRequest(req: Request, publicKey: string): Promise<JwtPayload | null> {
   const authHeader = req.headers.get("Authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
-  
-  const token = authHeader.replace("Bearer ", "");
+  let token: string | null = null;
+
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.replace("Bearer ", "");
+  } else {
+    // WebSocket upgrades and file-download links (e.g. window.open) can't set
+    // custom headers from the browser, so fall back to a ?token= query param.
+    token = new URL(req.url).searchParams.get("token");
+  }
+
+  if (!token) return null;
   try {
     // Verify JWT natively inside the Worker
     const payload = await verifyToken(token, { publicKey });
