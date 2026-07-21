@@ -27,8 +27,9 @@ new_sqlite_classes = ["GroupDurableObject"]
 # ---------------------------------------------
 # Static Assets (For serving the Vite React build)
 # ---------------------------------------------
-[site]
-bucket = "./dist"
+[assets]
+directory = "./dist"
+binding = "ASSETS"
 
 # Ensure the worker handles all routes, falling back to React Router
 [routes]
