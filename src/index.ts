@@ -1,0 +1,143 @@
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import * as XLSX from "xlsx";
+import { GroupDurableObject } from "./GroupDo";
+import { authenticateRequest, syncUserToD1 } from "./lib/auth";
+
+type Bindings = {
+  DB: D1Database;
+  GROUP_DO: DurableObjectNamespace<GroupDurableObject>;
+  CLERK_PEM_PUBLIC_KEY: string;
+};
+
+const app = new Hono<{ Bindings: Bindings }>();
+app.use("*", cors());
+
+// Middleware to protect all /api routes
+app.use("/api/*", async (c, next) => {
+  const payload = await authenticateRequest(c.req.raw, c.env.CLERK_PEM_PUBLIC_KEY);
+  if (!payload) return c.json({ error: "Unauthorized" }, 401);
+  
+  const userContext = await syncUserToD1(c.env.DB, payload);
+  c.set("user", userContext);
+  await next();
+});
+
+// --- UPLOAD CONTACTS (Admin Only) ---
+app.post("/api/contacts/upload", async (c) => {
+  const user = c.get("user");
+  if (user.role !== "admin") return c.json({ error: "Forbidden: Admins only" }, 403);
+
+  const formData = await c.req.formData();
+  const file = formData.get("file") as File;
+  if (!file) return c.json({ error: "No file provided" }, 400);
+
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const rows = XLSX.utils.sheet_to_json<Record<string, any>>(workbook.Sheets[workbook.SheetNames[0]]);
+
+  const stmt = c.env.DB.prepare(
+    `INSERT INTO contacts (id, group_id, phone_number, first_name, last_name, metadata) VALUES (?, ?, ?, ?, ?, ?)`
+  );
+
+  const batch = [];
+  for (const row of rows.slice(0, 10000)) {
+    const phone = String(row["phone"] || row["Phone"] || "").replace(/[^+\d]/g, "");
+    if (!phone) continue;
+
+    batch.push(stmt.bind(
+      crypto.randomUUID(),
+      user.orgId,
+      phone,
+      row["first_name"] || row["First Name"] || "",
+      row["last_name"] || row["Last Name"] || "",
+      JSON.stringify(row) // Store raw metadata
+    ));
+  }
+
+  if (batch.length === 0) return c.json({ error: "No valid contacts found in file" }, 400);
+
+  await c.env.DB.batch(batch);
+
+  // Wake up the DO and force it to reload state to include new contacts
+  const doStub = c.env.GROUP_DO.get(c.env.GROUP_DO.idFromName(user.orgId));
+  c.executionCtx.waitUntil(doStub.fetch("http://internal/reload", { method: "POST" }));
+
+  return c.json({ success: true, imported: batch.length });
+});
+
+// --- GET NEXT CONTACT (Callers) ---
+app.post("/api/contacts/next", async (c) => {
+  const user = c.get("user");
+  const doStub = c.env.GROUP_DO.get(c.env.GROUP_DO.idFromName(user.orgId));
+
+  const response = await doStub.fetch("http://internal/lock-next", {
+    method: "POST",
+    body: JSON.stringify({ callerId: user.userId }),
+    headers: { "Content-Type": "application/json" }
+  });
+
+  return new Response(response.body, { status: response.status });
+});
+
+// --- LOG CALL (Callers) ---
+app.post("/api/calls/log", async (c) => {
+  const user = c.get("user");
+  const { contact_id, disposition, notes } = await c.req.json();
+  const doStub = c.env.GROUP_DO.get(c.env.GROUP_DO.idFromName(user.orgId));
+
+  const response = await doStub.fetch("http://internal/complete", {
+    method: "POST",
+    body: JSON.stringify({ contactId: contact_id, callerId: user.userId, disposition, notes }),
+    headers: { "Content-Type": "application/json" }
+  });
+
+  return new Response(response.body, { status: response.status });
+});
+
+// --- EXPORT REPORT (Admins) ---
+app.get("/api/reports/export", async (c) => {
+  const user = c.get("user");
+  if (user.role !== "admin") return c.json({ error: "Forbidden" }, 403);
+
+  const logs = await c.env.DB.prepare(`
+    SELECT u.name as caller_name, c.first_name, c.last_name, c.phone_number, 
+           cl.disposition, cl.notes, cl.called_at
+    FROM call_logs cl
+    JOIN contacts c ON cl.contact_id = c.id
+    JOIN users u ON cl.caller_id = u.id
+    WHERE cl.group_id = ?
+    ORDER BY cl.called_at DESC
+  `).bind(user.orgId).all();
+
+  const worksheet = XLSX.utils.json_to_sheet(logs);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
+  
+  const buffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+
+  return new Response(buffer, {
+    headers: {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="report-${user.orgId}.xlsx"`
+    }
+  });
+});
+
+// --- WEBSOCKET ENDPOINT FOR ADMIN DASHBOARD ---
+app.get("/api/dashboard/ws", async (c) => {
+  const user = c.get("user");
+  if (user.role !== "admin") return c.json({ error: "Forbidden" }, 403);
+  
+  const doStub = c.env.GROUP_DO.get(c.env.GROUP_DO.idFromName(user.orgId));
+  
+  // Change the URL to match the DO internal routing
+  const newUrl = new URL(c.req.url);
+  newUrl.pathname = "/ws";
+  
+  return doStub.fetch(newUrl.toString(), {
+    headers: { "Upgrade": "websocket" }
+  });
+});
+
+export default app;
