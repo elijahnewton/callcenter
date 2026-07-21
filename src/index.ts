@@ -193,7 +193,7 @@ app.post("/api/contacts/distribute-evenly", async (c) => {
     `SELECT id FROM contacts WHERE group_id = ? AND status = 'available' AND assigned_to IS NULL`
   ).bind(user.orgId).all<{ id: string }>();
 
-  if (availableContacts.length === 0) {
+  if (availableContacts.results.length === 0) {
     return c.json({ success: true, message: "No unassigned available contacts to distribute" });
   }
 
@@ -220,7 +220,7 @@ app.post("/api/contacts/distribute-evenly", async (c) => {
   c.executionCtx.waitUntil(doStub.fetch("http://internal/reload", { method: "POST" }));
 
   const summary = caller_ids.map((id: string, i: number) => ({ caller_id: id, count: chunks[i].length }));
-  return c.json({ success: true, distributed: availableContacts.length, summary });
+  return c.json({ success: true, distributed: availableContacts.results.length, summary });
 });
 
 export default app;

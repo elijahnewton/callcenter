@@ -29,7 +29,7 @@ export class GroupDurableObject extends DurableObject<Env> {
        FROM contacts WHERE group_id = ? AND status IN ('available', 'locked')`
     ).bind(this.groupId).all<ContactMemory>();
 
-    for (const row of results) {
+    for (const row of results.results) {
       this.contacts.set(row.id, row);
     }
     this.initialized = true;
@@ -38,7 +38,7 @@ export class GroupDurableObject extends DurableObject<Env> {
   private broadcast(event: string, data: any) {
     const message = JSON.stringify({ event, data });
     for (const ws of this.sockets) {
-      if (ws.readyState === WebSocket.READY_STATE) {
+      if (ws.readyState === WebSocket.READY_STATE_OPEN) {
         ws.send(message);
       }
     }
@@ -115,11 +115,11 @@ export class GroupDurableObject extends DurableObject<Env> {
     this.contacts.delete(contactId);
 
     this.ctx.blockWaitUntil(
-      this.env.DB.batch(
+      this.env.DB.batch([
         this.env.DB.prepare(`UPDATE contacts SET status = 'completed' WHERE id = ?`).bind(contactId),
         this.env.DB.prepare(`INSERT INTO call_logs (id, group_id, contact_id, caller_id, disposition, notes) VALUES (?, ?, ?, ?, ?, ?)`)
           .bind(crypto.randomUUID(), this.groupId, contactId, callerId, disposition, notes)
-      )
+      ])
     );
 
     this.broadcast("call_completed", { contactId, callerId, disposition });
