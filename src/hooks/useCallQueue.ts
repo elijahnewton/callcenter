@@ -36,9 +36,10 @@ export function useCallQueue() {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ contact_id: contactId, disposition, notes })
     });
-    
+
     setCurrentContact(null); // Clear current contact
-  }, [getToken]);
+    await fetchNextContact(); // Immediately pull the next one in queue
+  }, [getToken, fetchNextContact]);
 
   return { currentContact, isLoading, fetchNextContact, submitDisposition };
 }
