@@ -45,3 +45,9 @@ CREATE TABLE IF NOT EXISTS call_logs (
 CREATE INDEX IF NOT EXISTS idx_contacts_group_status ON contacts(group_id, status);
 CREATE INDEX IF NOT EXISTS idx_call_logs_group ON call_logs(group_id);
 CREATE INDEX IF NOT EXISTS idx_call_logs_caller ON call_logs(caller_id);
+
+-- Add the assignment column
+ALTER TABLE contacts ADD COLUMN assigned_to TEXT DEFAULT NULL REFERENCES users(id) ON DELETE SET NULL;
+
+-- Create an index to make DO reload and assignment queries lightning fast
+CREATE INDEX IF NOT EXISTS idx_contacts_assignment ON contacts(group_id, assigned_to, status);
