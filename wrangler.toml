@@ -32,5 +32,5 @@ directory = "./dist"
 binding = "ASSETS"
 
 # Ensure the worker handles all routes, falling back to React Router
-[routes]
+[[routes]]
 pattern = "/*"
