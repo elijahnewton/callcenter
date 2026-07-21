@@ -8,6 +8,7 @@ type Bindings = {
   DB: D1Database;
   GROUP_DO: DurableObjectNamespace<GroupDurableObject>;
   CLERK_PEM_PUBLIC_KEY: string;
+  ASSETS: Fetcher;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -221,6 +222,43 @@ app.post("/api/contacts/distribute-evenly", async (c) => {
 
   const summary = caller_ids.map((id: string, i: number) => ({ caller_id: id, count: chunks[i].length }));
   return c.json({ success: true, distributed: availableContacts.results.length, summary });
+});
+
+// --- CATCH-ALL: Serve static assets and SPA index.html fallback ---
+// This must be the last route so everything else is tried first.
+// For any unmatched request, try to serve it as a static asset.
+// If the asset doesn't exist (404), serve index.html for client-side routing.
+app.all("*", async (c) => {
+  const url = new URL(c.req.url);
+  const pathname = url.pathname;
+
+  // Don't serve index.html fallback for API routes
+  if (pathname.startsWith("/api/")) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  try {
+    // Try to fetch the requested asset
+    const assetResponse = await c.env.ASSETS.fetch(pathname);
+    
+    // If the asset exists (not 404), return it
+    if (assetResponse.status !== 404) {
+      return assetResponse;
+    }
+
+    // Asset doesn't exist, serve index.html for SPA fallback
+    const indexResponse = await c.env.ASSETS.fetch("/index.html");
+    
+    // If index.html itself doesn't exist, something is seriously wrong
+    if (indexResponse.status !== 200) {
+      return c.json({ error: "Application not deployed correctly" }, 500);
+    }
+    
+    return indexResponse;
+  } catch (err) {
+    console.error("Fallback error:", err);
+    return c.json({ error: "Internal server error" }, 500);
+  }
 });
 
 export default app;
