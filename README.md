@@ -1,69 +1,109 @@
-# Offline-First Church Call Center Assistant & AI Companion
+☁️ CloudCall: High-Concurrency Outbound Dialing Platform
+CloudCall is an enterprise-grade, multi-tenant outbound calling application built entirely on Cloudflare's Edge Network. It eliminates double-calling using Cloudflare Durable Objects for zero-latency in-memory state locking, and provides real-time admin visibility via WebSockets.
 
-An offline-first, privacy-respecting campaign manager designed for church follow-ups, integrated with a serverless edge AI companion for document extraction and data sanitization.
+🏗️ Architecture
+The system splits responsibilities cleanly between persistent storage and ephemeral locking state.
+
+[ React Frontend (Vite) ] ───► Cloudflare Pages / Worker Static Assets          │          ▼ (HTTPS / WSS)[ Cloudflare Worker (Hono) ] ───► JWT Verification, Spreadsheet Parsing, Routing          │             │          ▼             ▼[ Cloudflare D1 ]   [ Durable Object (Per Group) ](SQLite DB)        (In-Memory Locking & WebSockets)
+Worker: Handles authentication, parses Excel files using SheetJS, and writes initial records to D1.
+Durable Object (DO): Acts as an isolated, single-threaded state machine for each Organization (Group). Because a DO processes messages sequentially, if 50 callers request a contact at the exact same millisecond, the DO hands out 50 unique contacts atomically. Zero race conditions.
+D1 Database: Serves as the persistent source of truth. The DO asynchronously flushes locked/completed states to D1 using ctx.blockWaitUntil so it doesn't block the caller's UI.
+✨ Core Features
+Multi-Tenancy: 1:1 mapping with Clerk Organizations. Org Admin = Campaign Manager. Org Member = Caller.
+Smart Contact Distribution: Admins can leave contacts in a "Shared Pool" (first-come-first-served) or "Auto-Distribute" lists evenly across specific callers.
+Zero Double-Calling: Guaranteed by Durable Object sequential execution logic.
+Real-Time Dashboard: Admins connect via WebSockets to see calls completed live as they happen across the team.
+Native Device Dialing: Uses tel: links to open the user's actual phone dialer.
+Offline-Resilient Worker: Once a caller locks a contact, they hold it in their browser state. If their internet drops mid-call, they can still log the disposition, and the Worker syncs when they reconnect.
+🛠️ Tech Stack
+Frontend: React 18, Vite, Tailwind CSS, Clerk React, Lucide Icons
+Backend: Cloudflare Workers, Hono (TypeScript Router)
+Database: Cloudflare D1 (SQLite)
+Real-time: Cloudflare Durable Objects (WebSockets & State)
+Auth: Clerk (Organizations & JWT Verification)
+🚀 Local Setup & Installation
+Prerequisites
+Node.js >= v18
+A Cloudflare account (wrangler login)
+A Clerk account with Organizations enabled.
+1. Clone & Install
+bash
+
+git clone <your-repo-url>
+cd cloudcall
+npm install
+2. Environment Variables
+Create a .dev.vars file in the root for local Worker secrets:
+
+env
+
+CLERK_PEM_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqh...\n-----END PUBLIC KEY-----"
+(Find your PEM Public Key in the Clerk Dashboard -> API Keys -> Advanced -> Copy PEM Public Key).
+
+Create a .env file in the root for the Vite frontend:
+
+env
+
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxxxxxxxxxxxxxxx
+3. Database Setup (D1)
+Initialize your local D1 database with the schema:
+
+bash
+
+npm run db:migrate:local
+4. Run Locally
+This runs the Wrangler worker (port 8787) and the Vite dev server (port 3000) simultaneously. Vite proxies API calls to Wrangler.
+
+bash
+
+npm run dev
+Open http://localhost:3000 in your browser.
+
+☁️ Production Deployment
+1. Create Remote D1 Database
+bash
+
+wrangler d1 create cloudcall-db
+Copy the database_id from the output and paste it into your wrangler.toml.
+
+2. Push Remote Schema
+bash
+
+npm run db:migrate:remote
+3. Deploy
+The deploy script automatically builds the React app and deploys the Worker + static assets in one command:
+
+bash
+
+npm run deploy
+📖 Usage Guide
+For Campaign Managers (Admins)
+Log in and ensure you are in the correct Organization (top right switcher).
+Navigate to /admin.
+Upload a .csv or .xlsx file. The system parses up to 10,000 rows and loads them into the "Shared Pool".
+Option A: Leave them in the Shared Pool. Callers will pull from the same bucket.
+Option B: Click "Distribute Evenly". The backend instantly chunks the list equally among active callers in your org.
+Monitor the real-time dashboard (WebSocket connected) to see the queue size drop as your team makes calls.
+Click "Export Report" at any time to download a full .xlsx file mapping exactly who called whom, the disposition, and notes.
+For Callers
+Log in and join the Organization provided by your manager.
+Navigate to /call.
+Click "Check for New Contacts". The backend instantly locks a contact for you.
+Click the green "Call Now" button. Your phone's native dialer opens.
+After the call, select a Disposition (Answered, No Answer, Voicemail, etc.), add notes, and click "Submit & Get Next".
+The system instantly releases the lock, logs the data, and fetches your next contact automatically.
+⚠️ Important Developer Notes
+nodejs_compat flag: The wrangler.toml must include nodejs_compat. SheetJS (xlsx) uses Node.js buffer APIs under the hood. Without this flag, parsing spreadsheets will crash the Worker.
+Durable Object Eviction: Cloudflare may evict DOs from memory if they receive no traffic for a few minutes. The ensureInitialized() method automatically rebuilds the in-memory state from D1 upon the next request, so this is handled safely.
+CORS: The Hono worker includes a global CORS middleware for local development. For production, you may want to restrict the Access-Control-Allow-Origin header to your specific Cloudflare Pages domain.
+text
+
 
 ---
 
-## System Architecture
-
-```mermaid
-graph TD
-    A[Handwritten Photo / Raw Text / Messy Sheet] -->|Drop / Paste| B(Campaign Data Companion)
-    B -->|API: /api/companion-process| C(Cloudflare Edge Worker)
-    C -->|Llama 3.2 Vision / 3.1 Instruct| D[Cloudflare Workers AI]
-    D -->|Structured JSON Array| C
-    C -->|JSON response| B
-    B -->|SheetJS Compilation| E[Clean CSV / XLSX Download]
-    E -->|Drag & Drop| F(Local Call Center Dialer)
-    F -->|IndexedDB Offline Sync| G[(Browser Dexie DB)]
-    F -->|Device Native Dialing| H[Phone Call App]
-```
-
-### Components
-
-1. **Local Call Center (Main App)**:
-   - **Technology Stack**: React, TypeScript, Vite, Dexie.js (IndexedDB), Lucide Icons, and SheetJS.
-   - **Features**: Progressive Web App (PWA) that installs on mobile or desktop and works 100% offline. Tracks campaigns contact-by-contact, auto-populates teleprompter scripts, hooks directly into the device's native telephone dialer, logs feedback statuses, and exports call sheets back to Excel.
-2. **Campaign Data Companion (Frontend Utility)**:
-   - **Technology Stack**: Static HTML, Vanilla CSS, Lucide CDNs, and SheetJS CDNs.
-   - **Features**: Modern dark-mode page serving three core data preparation tools:
-     - **Image OCR**: Converts handwriting and roster photographs to base64, rendering previews locally.
-     - **Text Paste**: Standardizes unstructured clipboard text lists.
-     - **Sheet Normalizer**: Parses spreadsheets locally using SheetJS and slices the first 200 rows into JSON payloads.
-3. **Edge AI Processor (Backend Worker)**:
-   - **Technology Stack**: TypeScript, Cloudflare Workers, and Workers AI.
-   - **Features**: Implements serverless edge endpoints (`/api/companion-process`) that intercept payloads, run vision or text instruction LLMs, and utilize a robust regex-based extraction parser to return structured `[{"name": "...", "phone": "..."}]` datasets.
-
----
-
-## Risks and Bottlenecks
-
-### 1. Data Privacy & Compliance
-- **Description**: The main Call Center application operates 100% offline in-browser to protect sensitive congregant data. However, the AI Companion transmits photos, text lists, or spreadsheet rows to Cloudflare's serverless edge.
-- **Risk**: If rosters contain highly sensitive PII (Personally Identifiable Information), sending them to a third-party Cloud API might violate organizational privacy mandates or regional data compliance laws (e.g., GDPR, CCPA).
-- **Mitigation**: Warn users of the data transit inside the UI. For strict privacy setups, migrate the backend Worker AI binding to run on self-hosted local models (e.g., LocalAI or Ollama) running within the church intranet.
-
-### 2. Context Window & Token Limits
-- **Description**: Large language models have finite context windows. Sending a spreadsheet with thousands of rows directly to the AI sanitization pipeline will exceed context limits or exhaust token quotas.
-- **Bottleneck**: The frontend is constrained to slice only the first 200 rows of spreadsheets for AI sanitization. Normalizing files larger than 200 rows requires the user to split the document into smaller chunks or clean them in multiple batches.
-- **Improvement**: Implement chunked processing on the frontend, breaking large sheets into batches of 100-200 rows and making sequential backend API calls, aggregating the final downloads.
-
-### 3. Edge AI Cold Starts & Latency
-- **Description**: Vision processing and instruct LLM completion on Cloudflare's shared GPU network can experience cold starts, rate limits, or network delays.
-- **Bottleneck**: Processing an image or text block can take up to 25 seconds, causing sluggish user feedback.
-- **Improvement**: Cache previous cleanings or show detailed progressive loading indicators. Configure rate-limiting queues to avoid overwhelming the Worker endpoint during heavy batch submissions.
-
-### 4. Parsing Accuracy & Hallucinations
-- **Description**: Handwritten cursive or blurry photographs can lead the AI Vision model to misread names or phone numbers, or hallucinate missing digits.
-- **Risk**: Important contacts may be downloaded with corrupted telephone numbers, making them undialable or leading to wrong-number calls.
-- **Mitigation**: The regex helper `sanitizeAndExtractJson` isolates and recovers structural JSON arrays but cannot validate number correctness. Users must inspect and verify the downloaded spreadsheets before running call campaigns.
-
-### 5. CORS & Access Security
-- **Description**: The Cloudflare Worker backend configures open CORS headers (`'Access-Control-Allow-Origin': '*'`) to enable easy integration and local development.
-- **Risk**: Without authentication, any script on the web could invoke the Worker and consume your Cloudflare AI resource budget.
-- **Improvement**: Lock down origin constraints in production or implement simple API key headers/JSON Web Token (JWT) verification to secure the `/api/companion-process` worker endpoint.
-
-### 6. IndexedDB Eviction
-- **Description**: Browser local storage (IndexedDB) is non-persistent by default. If a mobile device runs extremely low on disk space, the mobile OS may evict IndexedDB storage, leading to loss of call center campaign logs.
-- **Risk**: Losing in-progress campaign data if the browser cache is wiped.
-- **Mitigation**: Encourage users to use the floating backup button (`Download`) to export progress regularly.
+### Next Steps to get it running:
+1. Save these three files in your empty project folder.
+2. Run `npm install` (this generates the `package-lock.json`).
+3. Create your D1 database using `wrangler d1 create cloudcall-db` and update the `wrangler.toml`.
+4. Run `npm run db:migrate:local`.
+5. Run `npm run dev`.
