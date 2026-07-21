@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run dev:worker\" \"npm run dev:frontend\"",
-    "dev:worker": "wrangler dev --local",
+    "dev:worker": "wrangler dev",
     "dev:frontend": "vite",
     "build": "vite build",
     "preview": "vite preview",
@@ -14,23 +14,23 @@
     "db:migrate:remote": "wrangler d1 execute cloudcall-db --remote --file=./src/db/schema.sql"
   },
   "dependencies": {
-    "@clerk/backend": "^1.8.4",
-    "@clerk/clerk-react": "^5.4.1",
-    "hono": "^4.4.6",
-    "lucide-react": "^0.378.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^6.23.1",
+    "@clerk/backend": "^2.13.2",
+    "@clerk/clerk-react": "^5.61.3",
+    "hono": "^4.12.30",
+    "lucide-react": "^0.470.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.18.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240529.0",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.0",
+    "@cloudflare/workers-types": "^5.20260706.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.3",
     "concurrently": "^8.2.2",
-    "typescript": "^5.4.5",
-    "vite": "^5.2.12",
-    "wrangler": "^3.57.1"
+    "typescript": "^5.5.0",
+    "vite": "^8.1.5",
+    "wrangler": "^4.112.0"
   }
 }
