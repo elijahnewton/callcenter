@@ -23,7 +23,7 @@ class_name = "GroupDurableObject"
 # ---------------------------------------------
 [[migrations]]
 tag = "v1"
-new_classes = ["GroupDurableObject"]
+new_sqlite_classes = ["GroupDurableObject"]
 
 # ---------------------------------------------
 # Static Assets (Correct syntax for Wrangler v3)
