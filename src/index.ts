@@ -140,4 +140,76 @@ app.get("/api/dashboard/ws", async (c) => {
   });
 });
 
+// --- MANUAL ASSIGNMENT ---
+// Admin selects contacts in UI, picks a caller, and hits "Assign"
+app.post("/api/contacts/assign", async (c) => {
+  const user = c.get("user");
+  if (user.role !== "admin") return c.json({ error: "Forbidden" }, 403);
+
+  const { contact_ids, caller_id } = await c.req.json(); 
+  // caller_id can be a user ID, or null to push back to shared pool
+
+  if (!Array.isArray(contact_ids) || contact_ids.length === 0) {
+    return c.json({ error: "Provide contact_ids array" }, 400);
+  }
+
+  const stmt = c.env.DB.prepare(`UPDATE contacts SET assigned_to = ? WHERE id = ? AND group_id = ?`);
+  const batch = contact_ids.map((id: string) => stmt.bind(caller_id, id, user.orgId));
+  
+  await c.env.DB.batch(batch);
+
+  // Wake up DO to reload newly assigned contacts into memory
+  const doStub = c.env.GROUP_DO.get(c.env.GROUP_DO.idFromName(user.orgId));
+  c.executionCtx.waitUntil(doStub.fetch("http://internal/reload", { method: "POST" }));
+
+  return c.json({ success: true, assigned: contact_ids.length, to_caller: caller_id || "Shared Pool" });
+});
+
+// --- AUTO-DISTRIBUTE EVENLY ---
+// Admin clicks "Distribute Evenly" and passes an array of caller IDs
+app.post("/api/contacts/distribute-evenly", async (c) => {
+  const user = c.get("user");
+  if (user.role !== "admin") return c.json({ error: "Forbidden" }, 403);
+
+  const { caller_ids } = await c.req.json(); // e.g., ["user_1", "user_2", "user_3"]
+
+  if (!Array.isArray(caller_ids) || caller_ids.length === 0) {
+    return c.json({ error: "Provide caller_ids array to distribute to" }, 400);
+  }
+
+  // 1. Get all unassigned/available contacts for this group
+  const availableContacts = await c.env.DB.prepare(
+    `SELECT id FROM contacts WHERE group_id = ? AND status = 'available' AND assigned_to IS NULL`
+  ).bind(user.orgId).all<{ id: string }>();
+
+  if (availableContacts.length === 0) {
+    return c.json({ success: true, message: "No unassigned available contacts to distribute" });
+  }
+
+  // 2. Chunk them evenly
+  const chunks = caller_ids.map(() => [] as string[]);
+  availableContacts.results.forEach((contact, index) => {
+    chunks[index % caller_ids.length].push(contact.id);
+  });
+
+  // 3. Build batch update statements
+  const stmt = c.env.DB.prepare(`UPDATE contacts SET assigned_to = ? WHERE id = ?`);
+  const batch = [];
+  
+  caller_ids.forEach((callerId: string, index) => {
+    chunks[index].forEach((contactId) => {
+      batch.push(stmt.bind(callerId, contactId));
+    });
+  });
+
+  await c.env.DB.batch(batch);
+
+  // 4. Reload DO
+  const doStub = c.env.GROUP_DO.get(c.env.GROUP_DO.idFromName(user.orgId));
+  c.executionCtx.waitUntil(doStub.fetch("http://internal/reload", { method: "POST" }));
+
+  const summary = caller_ids.map((id: string, i: number) => ({ caller_id: id, count: chunks[i].length }));
+  return c.json({ success: true, distributed: availableContacts.length, summary });
+});
+
 export default app;
