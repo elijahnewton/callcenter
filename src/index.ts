@@ -8,6 +8,7 @@ type Bindings = {
   DB: D1Database;
   GROUP_DO: DurableObjectNamespace<GroupDurableObject>;
   CLERK_PEM_PUBLIC_KEY: string;
+  ASSETS: Fetcher; 
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
