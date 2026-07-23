@@ -35,6 +35,11 @@ app.use("/api/*", async (c, next) => {
   }
 });
 
+app.get("/api/me", async (c) => {
+  const user = c.get("user"); // already synced via middleware
+  return c.json({ user });
+});
+
 // --- UPLOAD CONTACTS (Admin Only) ---
 app.post("/api/contacts/upload", async (c) => {
   const user = c.get("user");
