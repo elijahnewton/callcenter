@@ -1,10 +1,38 @@
-import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn } from "@clerk/clerk-react";
+// src/App.tsx
+import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, useAuth } from "@clerk/clerk-react";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { CallerDashboard } from "./components/CallerDashboard";
+import { useEffect } from "react";
 
-// You can find this in your Clerk Dashboard -> API Keys
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+
+// ✅ New component that syncs the user to D1
+function SyncUser() {
+  const { getToken } = useAuth();
+
+  useEffect(() => {
+    const sync = async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        const res = await fetch("/api/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          console.warn("User sync failed:", await res.text());
+        } else {
+          console.log("User synced to D1");
+        }
+      } catch (err) {
+        console.error("Sync error:", err);
+      }
+    };
+    sync();
+  }, [getToken]);
+
+  return null; // This component only does side effects
+}
 
 function App() {
   return (
@@ -12,12 +40,27 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/sign-in/*" element={<SignInPage />} />
-          
+
           {/* Protected Routes */}
-          <Route path="/admin" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/call" element={<ProtectedRoute role="caller"><CallerDashboard /></ProtectedRoute>} />
-          
-          {/* Default redirect */}
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute role="admin">
+                <SyncUser />  {/* 👈 runs sync before dashboard */}
+                <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/call"
+            element={
+              <ProtectedRoute role="caller">
+                <SyncUser />  {/* 👈 runs sync before dashboard */}
+                <CallerDashboard />
+              </ProtectedRoute>
+            }
+          />
+
           <Route path="*" element={<Navigate to="/call" replace />} />
         </Routes>
       </BrowserRouter>
@@ -25,7 +68,6 @@ function App() {
   );
 }
 
-// Simple redirect if not logged in
 function SignInPage() {
   return (
     <div style={{ display: 'flex', justifyContent: 'center', marginTop: '4rem' }}>
@@ -35,8 +77,8 @@ function SignInPage() {
   );
 }
 
-// Placeholder for role-based routing (In a real app, fetch role from an API endpoint or Clerk metadata)
 function ProtectedRoute({ children, role }: { children: React.ReactNode, role: string }) {
+  // (For now, role is not enforced – you can later implement a real check)
   return (
     <>
       <SignedIn>{children}</SignedIn>
